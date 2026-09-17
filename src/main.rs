@@ -3,35 +3,19 @@ mod board;
 use board::Board;
 
 fn main() {
-    let mut board = Board::new();
+    let board = Board::new();
 
     board.print();
 
-    println!("White: e2e4");
+    let moves = board.generate_moves();
 
-    match board.make_move("e2", "e4") {
-        Ok(_) => board.print(),
-        Err(error) => println!("Error: {}", error),
-    }
+    println!("Legal moves: {}", moves.len());
 
-    println!("Black: e7e5");
-
-    match board.make_move("e7", "e5") {
-        Ok(_) => board.print(),
-        Err(error) => println!("Error: {}", error),
-    }
-
-    println!("White: g1f3");
-
-    match board.make_move("g1", "f3") {
-        Ok(_) => board.print(),
-        Err(error) => println!("Error: {}", error),
-    }
-
-    println!("Black: b8c6");
-
-    match board.make_move("b8", "c6") {
-        Ok(_) => board.print(),
-        Err(error) => println!("Error: {}", error),
+    for mv in &moves {
+        println!(
+            "{}{}",
+            Board::square_to_string_public(mv.from),
+            Board::square_to_string_public(mv.to)
+        );
     }
 }
