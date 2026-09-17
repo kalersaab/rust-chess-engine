@@ -1,34 +1,23 @@
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Piece {
-    Empty,
+use super::pieces::*;
 
-    WhitePawn,
-    WhiteKnight,
-    WhiteBishop,
-    WhiteRook,
-    WhiteQueen,
-    WhiteKing,
-
-    BlackPawn,
-    BlackKnight,
-    BlackBishop,
-    BlackRook,
-    BlackQueen,
-    BlackKing,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color {
     White,
     Black,
 }
 
+#[derive(Clone)]
 pub struct Board {
     pub squares: [[Piece; 8]; 8],
     pub turn: Color,
 }
 
 impl Board {
+    pub fn square_to_string_public(
+        square: (usize, usize),
+    ) -> String {
+        Self::square_to_string(square)
+    }
     pub fn new() -> Self {
         let mut board = Board {
             squares: [[Piece::Empty; 8]; 8],
@@ -72,7 +61,7 @@ impl Board {
             print!("{} ", 8 - rank);
 
             for file in 0..8 {
-                let piece = self.squares[file][rank];
+                let piece = self.squares[rank][file];
                 print!("{} ", piece_to_char(piece));
             }
 
@@ -374,53 +363,4 @@ fn parse_square(square: &str) -> Result<(usize, usize), String> {
     };
 
     Ok((rank, file))
-}
-
-fn is_white(piece: Piece) -> bool {
-    matches!(
-        piece,
-        Piece::WhitePawn
-            | Piece::WhiteKnight
-            | Piece::WhiteBishop
-            | Piece::WhiteRook
-            | Piece::WhiteQueen
-            | Piece::WhiteKing
-    )
-}
-
-fn is_black(piece: Piece) -> bool {
-    matches!(
-        piece,
-        Piece::BlackPawn
-            | Piece::BlackKnight
-            | Piece::BlackBishop
-            | Piece::BlackRook
-            | Piece::BlackQueen
-            | Piece::BlackKing
-    )
-}
-
-fn same_color(a: Piece, b: Piece) -> bool {
-    (is_white(a) && is_white(b))
-        || (is_black(a) && is_black(b))
-}
-
-fn piece_to_char(piece: Piece) -> char {
-    match piece {
-        Piece::Empty => '.',
-
-        Piece::WhitePawn => 'P',
-        Piece::WhiteKnight => 'N',
-        Piece::WhiteBishop => 'B',
-        Piece::WhiteRook => 'R',
-        Piece::WhiteQueen => 'Q',
-        Piece::WhiteKing => 'K',
-
-        Piece::BlackPawn => 'p',
-        Piece::BlackKnight => 'n',
-        Piece::BlackBishop => 'b',
-        Piece::BlackRook => 'r',
-        Piece::BlackQueen => 'q',
-        Piece::BlackKing => 'k',
-    }
 }
