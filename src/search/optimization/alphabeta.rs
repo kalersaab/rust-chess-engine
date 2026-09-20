@@ -1,5 +1,6 @@
 use crate::board::{Board, ChessMove};
-use crate::evaluation::Score;
+use crate::evaluation::{Evaluator, Score};
+use crate::nnue::NNUEAccumulator;
 use crate::transposition_table::{TranspositionTable, BoundType};
 use crate::move_ordering::MoveOrderer;
 
@@ -7,6 +8,8 @@ pub struct AlphaBeta {
     pub nodes: u64,
     pub qnodes: u64,
     pub cutoffs: u64,
+    pub best_move_at_root: Option<ChessMove>,
+    pub root_depth: u32,
 }
 
 impl AlphaBeta {
@@ -15,6 +18,8 @@ impl AlphaBeta {
             nodes: 0,
             qnodes: 0,
             cutoffs: 0,
+            best_move_at_root: None,
+            root_depth: 0,
         }
     }
 
@@ -22,13 +27,33 @@ impl AlphaBeta {
         &mut self,
         board: &mut Board,
         depth: u32,
-        mut alpha: Score,
+        alpha: Score,
         beta: Score,
         tt: &mut TranspositionTable,
         orderer: &mut MoveOrderer,
     ) -> Score {
+        let evaluator = Evaluator::new();
+        self.search_with_eval(board, depth, alpha, beta, tt, orderer, &evaluator, None)
+    }
+
+    pub fn search_with_eval(
+        &mut self,
+        board: &mut Board,
+        depth: u32,
+        mut alpha: Score,
+        beta: Score,
+        tt: &mut TranspositionTable,
+        orderer: &mut MoveOrderer,
+        evaluator: &Evaluator,
+        accumulator: Option<&NNUEAccumulator>,
+    ) -> Score {
+
+        if depth > self.root_depth {
+            self.root_depth = depth;
+        }
+        let is_root = depth == self.root_depth;
         if depth == 0 {
-            return self.quiescence(board, alpha, beta, tt, orderer);
+            return self.quiescence(board, alpha, beta, tt, orderer, evaluator, accumulator);
         }
 
         self.nodes += 1;
@@ -52,18 +77,35 @@ impl AlphaBeta {
         let mut best_score = -200000;
 
         for mv in moves {
-            let from = Board::square_to_string(mv.from);
-            let to = Board::square_to_string(mv.to);
-
             let mut next_board = board.clone();
-            if next_board.make_move(&from, &to).is_err() {
+            if next_board.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
             }
 
-            let score = -self.search(&mut next_board, depth - 1, -beta, -alpha, tt, orderer);
+            let next_acc = match (accumulator, evaluator.nnue_network.as_ref()) {
+                (Some(acc), Some(net)) => Some(acc.update_move(board, &mv, &net.weights)),
+                _ => None,
+            };
+
+            let score = -self.search_with_eval(
+                &mut next_board,
+                depth - 1,
+                -beta,
+                -alpha,
+                tt,
+                orderer,
+                evaluator,
+                next_acc.as_ref(),
+            );
 
             best_score = best_score.max(score);
-            alpha = alpha.max(score);
+
+            if score > alpha {
+                alpha = score;
+                if is_root {
+                    self.best_move_at_root = Some(mv);
+                }
+            }
 
             if alpha >= beta {
                 self.cutoffs += 1;
@@ -83,10 +125,12 @@ impl AlphaBeta {
         beta: Score,
         tt: &mut TranspositionTable,
         _orderer: &MoveOrderer,
+        evaluator: &Evaluator,
+        accumulator: Option<&NNUEAccumulator>,
     ) -> Score {
         self.qnodes += 1;
 
-        let static_eval = crate::evaluation::Evaluator::evaluate(board);
+        let static_eval = evaluator.evaluate_with_accumulator(board, accumulator);
         
         if static_eval >= beta {
             return beta;
@@ -103,15 +147,25 @@ impl AlphaBeta {
                 continue;
             }
 
-            let from = Board::square_to_string(mv.from);
-            let to = Board::square_to_string(mv.to);
-
             let mut board_copy = board.clone();
-            if board_copy.make_move(&from, &to).is_err() {
+            if board_copy.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
             }
 
-            let score = -self.quiescence(&board_copy, -beta, -alpha, tt, _orderer);
+            let next_acc = match (accumulator, evaluator.nnue_network.as_ref()) {
+                (Some(acc), Some(net)) => Some(acc.update_move(board, &mv, &net.weights)),
+                _ => None,
+            };
+
+            let score = -self.quiescence(
+                &board_copy,
+                -beta,
+                -alpha,
+                tt,
+                _orderer,
+                evaluator,
+                next_acc.as_ref(),
+            );
             best_score = best_score.max(score);
             alpha = alpha.max(score);
 

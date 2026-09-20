@@ -51,11 +51,8 @@ impl PrincipalVariationSearch {
         let mut first_move = true;
 
         for mv in moves {
-            let from = Board::square_to_string(mv.from);
-            let to = Board::square_to_string(mv.to);
-
             let mut next_board = board.clone();
-            if next_board.make_move(&from, &to).is_err() {
+            if next_board.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
             }
 
@@ -99,7 +96,7 @@ impl PrincipalVariationSearch {
     ) -> Score {
         self.qnodes += 1;
 
-        let static_eval = crate::evaluation::Evaluator::evaluate(board);
+        let static_eval = crate::evaluation::Evaluator::hand_crafted_evaluate(board);
         
         if static_eval >= beta {
             return beta;
@@ -116,11 +113,8 @@ impl PrincipalVariationSearch {
                 continue;
             }
 
-            let from = Board::square_to_string(mv.from);
-            let to = Board::square_to_string(mv.to);
-
             let mut board_copy = board.clone();
-            if board_copy.make_move(&from, &to).is_err() {
+            if board_copy.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
             }
 

@@ -47,7 +47,35 @@ impl OpeningBook {
         }
 
         self.loaded = true;
+        self.load_default_openings();
         Ok(count)
+    }
+
+    pub fn load_default_openings(&mut self) {
+        let start = Board::new();
+        let start_hash = self.position_hash(&start);
+        if !self.positions.contains_key(&start_hash) {
+            let start_moves = vec![
+                BookMove {
+                    move_obj: ChessMove::new(6, 4, 4, 4), // e2 -> e4
+                    weight: 100,
+                },
+                BookMove {
+                    move_obj: ChessMove::new(6, 3, 4, 3), // d2 -> d4
+                    weight: 95,
+                },
+                BookMove {
+                    move_obj: ChessMove::new(6, 2, 4, 2), // c2 -> c4
+                    weight: 80,
+                },
+                BookMove {
+                    move_obj: ChessMove::new(7, 6, 5, 5), // g1 -> f3
+                    weight: 75,
+                },
+            ];
+            self.positions.insert(start_hash, start_moves);
+        }
+        self.loaded = true;
     }
 
     fn parse_epd_line(&mut self, line: &str) -> Result<bool, String> {
@@ -82,6 +110,15 @@ impl OpeningBook {
             }
 
             if field == "ce" && !values.is_empty() {
+            }
+        }
+
+        if moves.is_empty() {
+            for chess_move in board.generate_moves() {
+                moves.push(BookMove {
+                    move_obj: chess_move,
+                    weight: 100,
+                });
             }
         }
 
@@ -463,5 +500,23 @@ mod tests {
         book.clear();
         assert_eq!(book.size(), 0);
         assert!(!book.is_loaded());
+    }
+
+    #[test]
+    fn test_first_lines_of_endgames() {
+        use std::fs::File;
+        use std::io::{BufRead, BufReader};
+        if let Ok(file) = File::open("endgames.epd") {
+            let reader = BufReader::new(file);
+            let mut count = 0;
+            for line in reader.lines().take(500) {
+                let line = line.unwrap();
+                let board = Board::from_fen(&line).unwrap();
+                let moves = board.generate_moves();
+                assert!(!moves.is_empty());
+                count += 1;
+            }
+            assert_eq!(count, 500);
+        }
     }
 }

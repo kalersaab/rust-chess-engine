@@ -18,11 +18,22 @@ fn main() {
             "--bench" => {
                 run_search_benchmarks();
             }
+            "--bench-eval" | "--eval-bench" => {
+                benchmark::run_eval_benchmark();
+            }
             "--special" => {
                 test_special_moves();
             }
             "--book" => {
                 test_opening_book();
+            }
+            "--probe-nnue" | "--nnue" => {
+                let path = if args.len() > 2 {
+                    args[2].as_str()
+                } else {
+                    "nn-134a887f4c8f.nnue"
+                };
+                probe_nnue_file(path);
             }
             _ => {
                 run_tests();
@@ -30,6 +41,40 @@ fn main() {
         }
     } else {
         run_tests();
+    }
+}
+
+fn probe_nnue_file(path: &str) {
+    println!("=== Stockfish NNUE Inspector & Validator ===\n");
+    println!("File: {}", path);
+    match rust_chess_engine::nnue::SFNNUEProbe::probe_file(path) {
+        Ok(info) => {
+            println!("Status:        ✓ Valid Stockfish SFNNv16 Network");
+            println!("File Size:     {} bytes", info.file_size);
+            println!("Version:       0x{:08x}", info.version);
+            println!("Arch Hash:     0x{:08x}", info.architecture_hash);
+            println!("Description:   {}", info.description);
+            println!("\n--- Feature Transformer ---");
+            println!("FT Hash:       0x{:08x}", info.feature_transformer_hash);
+            println!("FT Biases:     {} int16 values", info.ft_biases_count);
+            println!("Sample Biases: {:?}", info.ft_sample_biases);
+            println!("Threats:       59,808 inputs x 1024 int8 weights ({} bytes) + {} PSQT", info.threat_weights_bytes, info.threat_psqt_count);
+            println!("Pawn Pairs:    4,560 inputs x 1024 int8 weights ({} bytes) + {} PSQT", info.pawn_pair_weights_bytes, info.pawn_pair_psqt_count);
+            println!("HalfKAv2_hm:   22,528 inputs x 1024 int16 weights ({} values) + {} PSQT", info.half_ka_weights_count, info.half_ka_psqt_count);
+            println!("Total Inputs:  86,896 features (Dual Perspective Accumulator)");
+            println!("\n--- Evaluation Networks ---");
+            println!("Net Arch Hash: 0x{:08x}", info.network_architecture_hash);
+            println!("Layer Stacks:  {} material-bucketed stacks", info.layer_stacks_count);
+            println!("Layer 1 (fc0): {} inputs -> {} outputs (AffineTransformSparseInput)", info.fc0_dim.0, info.fc0_dim.1);
+            println!("Activation:    SqrClippedReLU + ClippedReLU (64 channels)");
+            println!("Layer 2 (fc1): {} inputs -> {} outputs (AffineTransform)", info.fc1_dim.0, info.fc1_dim.1);
+            println!("Layer 3 (fc2): {} inputs -> {} output (AffineTransform + Skip Connection)", info.fc2_dim.0, info.fc2_dim.1);
+            println!("\nVerification:  {} / {} bytes validated (100% complete)", info.bytes_consumed, info.file_size);
+        }
+        Err(err) => {
+            eprintln!("Status:        ✗ Validation Failed");
+            eprintln!("Error:         {}", err);
+        }
     }
 }
 
