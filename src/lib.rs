@@ -7,6 +7,7 @@ pub mod transposition_table;
 pub mod uci;
 pub mod perft;
 pub mod opening_book;
+pub mod nnue;
 
 pub use board::Board;
 pub use evaluation::Evaluator;
@@ -18,4 +19,5 @@ pub mod prelude {
     pub use crate::evaluation::Evaluator;
     pub use crate::search::Searcher;
     pub use crate::uci::UciEngine;
+    pub use crate::nnue::{NNUENetwork, NNUETrainer, NNUESerializer};
 }

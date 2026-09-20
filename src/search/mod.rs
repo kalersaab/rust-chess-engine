@@ -22,6 +22,7 @@ pub struct Searcher {
     pub tt: crate::transposition_table::TranspositionTable,
     pub move_orderer: crate::move_ordering::MoveOrderer,
     pub opening_book: OpeningBook,
+    pub evaluator: crate::evaluation::Evaluator,
     ab_search: AlphaBeta,
     id_search: IterativeDeepening,
     start_time: Option<std::time::Instant>,
@@ -35,6 +36,7 @@ impl Searcher {
             tt: crate::transposition_table::TranspositionTable::new(16),
             move_orderer: crate::move_ordering::MoveOrderer::new(20),
             opening_book: OpeningBook::new(),
+            evaluator: crate::evaluation::Evaluator::new(),
             ab_search: AlphaBeta::new(),
             id_search: IterativeDeepening::new(),
             start_time: None,
@@ -44,6 +46,14 @@ impl Searcher {
 
     pub fn set_tt_size(&mut self, size_mb: u32) {
         self.tt = crate::transposition_table::TranspositionTable::new(size_mb);
+    }
+
+    pub fn set_evaluator(&mut self, evaluator: crate::evaluation::Evaluator) {
+        self.evaluator = evaluator;
+    }
+
+    pub fn set_evaluation_mode(&mut self, mode: crate::evaluation::EvaluationMode) {
+        self.evaluator.set_mode(mode);
     }
 
     pub fn load_opening_book<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<usize, String> {
@@ -65,7 +75,7 @@ impl Searcher {
             return (Some(book_move), 1);
         }
         
-        let best_move = self.id_search.search(board, max_depth, Some(time_available_ms));
+        let best_move = self.id_search.search_with_eval(board, max_depth, Some(time_available_ms), &self.evaluator);
         
         self.stats.search_depth = self.id_search.depth_achieved;
         self.stats.nodes = self.ab_search.nodes;
@@ -79,13 +89,12 @@ impl Searcher {
         (best_move, self.id_search.depth_achieved)
     }
 
-    pub fn find_best_move(&mut self, board: &mut Board, _depth: u32) -> Option<crate::board::chess_move::ChessMove> {
+    pub fn find_best_move(&mut self, board: &mut Board, depth: u32) -> Option<crate::board::chess_move::ChessMove> {
         if let Some(book_move) = self.opening_book.get_book_move(board) {
             return Some(book_move);
         }
 
-        let moves = board.generate_moves();
-        moves.first().copied()
+        self.id_search.search_with_eval(board, depth, None, &self.evaluator)
     }
 }
 

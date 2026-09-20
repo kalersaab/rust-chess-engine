@@ -12,7 +12,7 @@ impl QuiescenceSearch {
         beta: Score,
         tt: &mut TranspositionTable,
     ) -> Score {
-        let static_eval = crate::evaluation::Evaluator::evaluate(board);
+        let static_eval = crate::evaluation::Evaluator::hand_crafted_evaluate(board);
         
         if static_eval >= beta {
             return beta;

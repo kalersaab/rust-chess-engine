@@ -99,7 +99,7 @@ impl PrincipalVariationSearch {
     ) -> Score {
         self.qnodes += 1;
 
-        let static_eval = crate::evaluation::Evaluator::evaluate(board);
+        let static_eval = crate::evaluation::Evaluator::hand_crafted_evaluate(board);
         
         if static_eval >= beta {
             return beta;

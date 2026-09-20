@@ -1,5 +1,6 @@
 use crate::board::{Board, ChessMove};
-use crate::evaluation::Score;
+use crate::evaluation::{Evaluator, Score};
+use crate::nnue::NNUEAccumulator;
 use crate::transposition_table::{TranspositionTable, BoundType};
 use crate::move_ordering::MoveOrderer;
 
@@ -22,13 +23,28 @@ impl AlphaBeta {
         &mut self,
         board: &mut Board,
         depth: u32,
-        mut alpha: Score,
+        alpha: Score,
         beta: Score,
         tt: &mut TranspositionTable,
         orderer: &mut MoveOrderer,
     ) -> Score {
+        let evaluator = Evaluator::new();
+        self.search_with_eval(board, depth, alpha, beta, tt, orderer, &evaluator, None)
+    }
+
+    pub fn search_with_eval(
+        &mut self,
+        board: &mut Board,
+        depth: u32,
+        mut alpha: Score,
+        beta: Score,
+        tt: &mut TranspositionTable,
+        orderer: &mut MoveOrderer,
+        evaluator: &Evaluator,
+        accumulator: Option<&NNUEAccumulator>,
+    ) -> Score {
         if depth == 0 {
-            return self.quiescence(board, alpha, beta, tt, orderer);
+            return self.quiescence(board, alpha, beta, tt, orderer, evaluator, accumulator);
         }
 
         self.nodes += 1;
@@ -60,7 +76,21 @@ impl AlphaBeta {
                 continue;
             }
 
-            let score = -self.search(&mut next_board, depth - 1, -beta, -alpha, tt, orderer);
+            let next_acc = match (accumulator, evaluator.nnue_network.as_ref()) {
+                (Some(acc), Some(net)) => Some(acc.update_move(board, &mv, &net.weights)),
+                _ => None,
+            };
+
+            let score = -self.search_with_eval(
+                &mut next_board,
+                depth - 1,
+                -beta,
+                -alpha,
+                tt,
+                orderer,
+                evaluator,
+                next_acc.as_ref(),
+            );
 
             best_score = best_score.max(score);
             alpha = alpha.max(score);
@@ -83,10 +113,12 @@ impl AlphaBeta {
         beta: Score,
         tt: &mut TranspositionTable,
         _orderer: &MoveOrderer,
+        evaluator: &Evaluator,
+        accumulator: Option<&NNUEAccumulator>,
     ) -> Score {
         self.qnodes += 1;
 
-        let static_eval = crate::evaluation::Evaluator::evaluate(board);
+        let static_eval = evaluator.evaluate_with_accumulator(board, accumulator);
         
         if static_eval >= beta {
             return beta;
@@ -111,7 +143,20 @@ impl AlphaBeta {
                 continue;
             }
 
-            let score = -self.quiescence(&board_copy, -beta, -alpha, tt, _orderer);
+            let next_acc = match (accumulator, evaluator.nnue_network.as_ref()) {
+                (Some(acc), Some(net)) => Some(acc.update_move(board, &mv, &net.weights)),
+                _ => None,
+            };
+
+            let score = -self.quiescence(
+                &board_copy,
+                -beta,
+                -alpha,
+                tt,
+                _orderer,
+                evaluator,
+                next_acc.as_ref(),
+            );
             best_score = best_score.max(score);
             alpha = alpha.max(score);
 

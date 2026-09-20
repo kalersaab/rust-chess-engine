@@ -189,6 +189,125 @@ pub fn benchmark_search(mut board: Board, depth: u32) -> SearchBenchmark {
     }
 }
 
+pub fn run_eval_benchmark() {
+    use rust_chess_engine::evaluation::{Evaluator, EvaluationMode};
+    use rust_chess_engine::nnue::NNUENetwork;
+
+    println!("\n╔════════════════════════════════════════════════════════════════╗");
+    println!("║       NNUE vs HANDCRAFTED EVALUATION BENCHMARK SUITE          ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+
+    let network = NNUENetwork::new();
+    let board = Board::from_fen("r1bqk2r/pp1p1ppp/2n1pn2/8/2PP4/2P2N2/P4PPP/R1BQKB1R w KQkq - 0 8")
+        .expect("Valid FEN");
+
+    println!("SECTION 1: RAW EVALUATION SPEED & ACCUMULATOR ACCELERATION");
+    println!("{}", "─".repeat(64));
+
+    let iterations = 10_000;
+
+    let start = Instant::now();
+    let mut hc_sum = 0i64;
+    for _ in 0..iterations {
+        hc_sum += Evaluator::hand_crafted_evaluate(&board) as i64;
+    }
+    let hc_time = start.elapsed();
+    let hc_eps = (iterations as f64 / hc_time.as_secs_f64()) / 1_000.0;
+
+    let start = Instant::now();
+    let mut nn_full_sum = 0i64;
+    for _ in 0..iterations {
+        nn_full_sum += network.evaluate(&board) as i64;
+    }
+    let nn_full_time = start.elapsed();
+    let nn_full_eps = (iterations as f64 / nn_full_time.as_secs_f64()) / 1_000.0;
+
+    let start = Instant::now();
+    let acc = network.create_accumulator(&board);
+    let mut nn_acc_sum = 0i64;
+    for _ in 0..iterations {
+        nn_acc_sum += network.evaluate_accumulator(&acc, board.turn) as i64;
+    }
+    let nn_acc_time = start.elapsed();
+    let nn_acc_eps = (iterations as f64 / nn_acc_time.as_secs_f64()) / 1_000.0;
+
+    println!("Handcrafted Evaluator:    {:>8.1} Keval/s ({:>5.1} ms / 10k)", hc_eps, hc_time.as_secs_f64() * 1000.0);
+    println!("Full NNUE (Recompute):    {:>8.1} Keval/s ({:>5.1} ms / 10k)", nn_full_eps, nn_full_time.as_secs_f64() * 1000.0);
+    println!("Incremental NNUE (Acc):   {:>8.1} Keval/s ({:>5.1} ms / 10k)", nn_acc_eps, nn_acc_time.as_secs_f64() * 1000.0);
+    let speedup = nn_acc_eps / nn_full_eps;
+    println!("✓ Accumulator Speedup:    {:>8.2}x faster than Full NNUE recomputation", speedup);
+    assert!(hc_sum != 0 || nn_full_sum != 0 || nn_acc_sum != 0);
+
+    println!("\nSECTION 2: SEARCH THROUGHPUT & PERFORMANCE AT DEPTH");
+    println!("{}", "─".repeat(64));
+
+    let positions = vec![
+        ("Starting Position", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 4),
+        ("Complex Middlegame", "r1bqk2r/pp1p1ppp/2n1pn2/8/2PP4/2P2N2/P4PPP/R1BQKB1R w KQkq - 0 8", 4),
+        ("Tactical Endgame", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 4),
+    ];
+
+    for (name, fen, depth) in positions {
+        println!("\nPosition: {} (Depth {})", name, depth);
+        println!("{}", "─".repeat(64));
+
+        let test_board = Board::from_fen(fen).expect("Valid FEN");
+
+        // Handcrafted Search
+        let mut searcher_hc = Searcher::new();
+        searcher_hc.set_tt_size(32);
+        searcher_hc.set_evaluation_mode(EvaluationMode::Handcrafted);
+        let start_hc = Instant::now();
+        let move_hc = searcher_hc.find_best_move(&mut test_board.clone(), depth);
+        let time_hc = start_hc.elapsed();
+
+        // NNUE Search with Incremental Accumulator
+        let mut searcher_nn = Searcher::new();
+        searcher_nn.set_tt_size(32);
+        searcher_nn.set_evaluator(Evaluator::with_nnue(NNUENetwork::new()));
+        let start_nn = Instant::now();
+        let move_nn = searcher_nn.find_best_move(&mut test_board.clone(), depth);
+        let time_nn = start_nn.elapsed();
+
+        let move_hc_str = move_hc.map(|m| format!("{}->{}", Board::square_to_string(m.from), Board::square_to_string(m.to))).unwrap_or_default();
+        let move_nn_str = move_nn.map(|m| format!("{}->{}", Board::square_to_string(m.from), Board::square_to_string(m.to))).unwrap_or_default();
+
+        println!("Handcrafted : Nodes: {:>7} | Time: {:>5}ms | Best Move: {:>6}", searcher_hc.stats.nodes, time_hc.as_millis(), move_hc_str);
+        println!("NNUE Acc    : Nodes: {:>7} | Time: {:>5}ms | Best Move: {:>6}", searcher_nn.stats.nodes, time_nn.as_millis(), move_nn_str);
+    }
+
+    println!("\nSECTION 3: POSITION EVALUATION COMPARISON");
+    println!("{}", "─".repeat(64));
+
+    let eval_positions = vec![
+        ("Starting Pos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+        ("Italian Game", "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 0 5"),
+        ("Sicilian Def", "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2"),
+        ("Passed Pawn",  "8/5pk1/1p4p1/3P4/r7/5P2/6P1/4R1K1 w - - 0 35"),
+    ];
+
+    println!("{:<15} | {:>12} | {:>12} | {:>12}", "Position", "Handcrafted", "NNUE Raw", "NNUE Acc");
+    println!("{}", "─".repeat(60));
+
+    let nn_evaluator = Evaluator::with_nnue(NNUENetwork::new());
+    let hc_evaluator = Evaluator::new();
+
+    for (name, fen) in eval_positions {
+        let b = Board::from_fen(fen).expect("Valid FEN");
+        let hc_val = hc_evaluator.evaluate(&b);
+        let nn_val = nn_evaluator.evaluate(&b);
+        let acc = nn_evaluator.nnue_network.as_ref().map(|n| n.create_accumulator(&b));
+        let acc_val = nn_evaluator.evaluate_with_accumulator(&b, acc.as_ref());
+
+        println!("{:<15} | {:>10} cp | {:>10} cp | {:>10} cp", name, hc_val, nn_val, acc_val);
+        assert_eq!(nn_val, acc_val);
+    }
+
+    println!("\n╔════════════════════════════════════════════════════════════════╗");
+    println!("║       EVALUATION BENCHMARK SUITE COMPLETE                     ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -30,6 +30,17 @@ impl IterativeDeepening {
         max_depth: u32,
         time_limit_ms: Option<u128>,
     ) -> Option<ChessMove> {
+        let evaluator = crate::evaluation::Evaluator::new();
+        self.search_with_eval(board, max_depth, time_limit_ms, &evaluator)
+    }
+
+    pub fn search_with_eval(
+        &mut self,
+        board: &mut Board,
+        max_depth: u32,
+        time_limit_ms: Option<u128>,
+        evaluator: &crate::evaluation::Evaluator,
+    ) -> Option<ChessMove> {
         let start = Instant::now();
         let time_limit = time_limit_ms.map(|ms| Duration::from_millis(ms as u64));
 
@@ -43,6 +54,12 @@ impl IterativeDeepening {
         let mut ab = AlphaBeta::new();
         let mut aspiration = AspirationWindows::new();
 
+        let root_accumulator = if evaluator.mode != crate::evaluation::EvaluationMode::Handcrafted {
+            evaluator.nnue_network.as_ref().map(|net| net.create_accumulator(board))
+        } else {
+            None
+        };
+
         self.best_move = Some(moves[0]);
 
         for depth in 1..=max_depth {
@@ -52,7 +69,16 @@ impl IterativeDeepening {
                 }
             }
 
-            let score = aspiration.search(&mut ab, board, depth, self.best_score, &mut tt, &mut orderer);
+            let score = aspiration.search_with_eval(
+                &mut ab,
+                board,
+                depth,
+                self.best_score,
+                &mut tt,
+                &mut orderer,
+                evaluator,
+                root_accumulator.as_ref(),
+            );
             
             self.best_score = score;
             self.depth_achieved = depth;
