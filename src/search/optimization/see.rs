@@ -16,10 +16,7 @@ impl StaticExchangeEvaluation {
 
         let mut board_copy = board.clone();
         
-        let from_str = Board::square_to_string(chess_move.from);
-        let to_str = Board::square_to_string(chess_move.to);
-        
-        if board_copy.make_move(&from_str, &to_str).is_err() {
+        if board_copy.execute_move(chess_move.from, chess_move.to, chess_move.move_type).is_err() {
             return 0;
         }
 

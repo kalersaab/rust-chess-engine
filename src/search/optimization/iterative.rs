@@ -12,6 +12,7 @@ pub struct IterativeDeepening {
     pub best_score: Score,
     pub depth_achieved: u32,
     pub time_spent_ms: u128,
+    pub ab: AlphaBeta,
 }
 
 impl IterativeDeepening {
@@ -21,6 +22,7 @@ impl IterativeDeepening {
             best_score: 0,
             depth_achieved: 0,
             time_spent_ms: 0,
+            ab: AlphaBeta::new(),
         }
     }
 
@@ -51,7 +53,7 @@ impl IterativeDeepening {
 
         let mut tt = TranspositionTable::new(16);
         let mut orderer = MoveOrderer::new(max_depth);
-        let mut ab = AlphaBeta::new();
+        self.ab = AlphaBeta::new();
         let mut aspiration = AspirationWindows::new();
 
         let root_accumulator = if evaluator.mode != crate::evaluation::EvaluationMode::Handcrafted {
@@ -69,8 +71,11 @@ impl IterativeDeepening {
                 }
             }
 
+            self.ab.best_move_at_root = None;
+            self.ab.root_depth = 0;
+
             let score = aspiration.search_with_eval(
-                &mut ab,
+                &mut self.ab,
                 board,
                 depth,
                 self.best_score,
@@ -83,8 +88,8 @@ impl IterativeDeepening {
             self.best_score = score;
             self.depth_achieved = depth;
 
-            if moves.len() > 0 {
-                self.best_move = Some(moves[0]);
+            if let Some(best) = self.ab.best_move_at_root {
+                self.best_move = Some(best);
             }
 
             if let Some(limit) = time_limit {

@@ -8,6 +8,8 @@ pub struct AlphaBeta {
     pub nodes: u64,
     pub qnodes: u64,
     pub cutoffs: u64,
+    pub best_move_at_root: Option<ChessMove>,
+    pub root_depth: u32,
 }
 
 impl AlphaBeta {
@@ -16,6 +18,8 @@ impl AlphaBeta {
             nodes: 0,
             qnodes: 0,
             cutoffs: 0,
+            best_move_at_root: None,
+            root_depth: 0,
         }
     }
 
@@ -43,6 +47,11 @@ impl AlphaBeta {
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,
     ) -> Score {
+
+        if depth > self.root_depth {
+            self.root_depth = depth;
+        }
+        let is_root = depth == self.root_depth;
         if depth == 0 {
             return self.quiescence(board, alpha, beta, tt, orderer, evaluator, accumulator);
         }
@@ -68,11 +77,8 @@ impl AlphaBeta {
         let mut best_score = -200000;
 
         for mv in moves {
-            let from = Board::square_to_string(mv.from);
-            let to = Board::square_to_string(mv.to);
-
             let mut next_board = board.clone();
-            if next_board.make_move(&from, &to).is_err() {
+            if next_board.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
             }
 
@@ -93,7 +99,13 @@ impl AlphaBeta {
             );
 
             best_score = best_score.max(score);
-            alpha = alpha.max(score);
+
+            if score > alpha {
+                alpha = score;
+                if is_root {
+                    self.best_move_at_root = Some(mv);
+                }
+            }
 
             if alpha >= beta {
                 self.cutoffs += 1;
@@ -135,11 +147,8 @@ impl AlphaBeta {
                 continue;
             }
 
-            let from = Board::square_to_string(mv.from);
-            let to = Board::square_to_string(mv.to);
-
             let mut board_copy = board.clone();
-            if board_copy.make_move(&from, &to).is_err() {
+            if board_copy.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
             }
 

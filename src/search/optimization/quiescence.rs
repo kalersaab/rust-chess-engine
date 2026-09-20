@@ -31,11 +31,8 @@ impl QuiescenceSearch {
         let mut best_score = static_eval;
 
         for mv in moves {
-            let from = Board::square_to_string(mv.from);
-            let to = Board::square_to_string(mv.to);
-
             let mut board_copy = board.clone();
-            if board_copy.make_move(&from, &to).is_err() {
+            if board_copy.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
             }
 

@@ -2,7 +2,6 @@ pub mod optimization;
 
 use crate::board::Board;
 use crate::opening_book::OpeningBook;
-use optimization::alphabeta::AlphaBeta;
 use optimization::iterative::IterativeDeepening;
 
 #[derive(Debug, Clone, Default)]
@@ -23,7 +22,6 @@ pub struct Searcher {
     pub move_orderer: crate::move_ordering::MoveOrderer,
     pub opening_book: OpeningBook,
     pub evaluator: crate::evaluation::Evaluator,
-    ab_search: AlphaBeta,
     id_search: IterativeDeepening,
     start_time: Option<std::time::Instant>,
     time_limit: Option<std::time::Duration>,
@@ -37,7 +35,6 @@ impl Searcher {
             move_orderer: crate::move_ordering::MoveOrderer::new(20),
             opening_book: OpeningBook::new(),
             evaluator: crate::evaluation::Evaluator::new(),
-            ab_search: AlphaBeta::new(),
             id_search: IterativeDeepening::new(),
             start_time: None,
             time_limit: None,
@@ -78,9 +75,9 @@ impl Searcher {
         let best_move = self.id_search.search_with_eval(board, max_depth, Some(time_available_ms), &self.evaluator);
         
         self.stats.search_depth = self.id_search.depth_achieved;
-        self.stats.nodes = self.ab_search.nodes;
-        self.stats.qnodes = self.ab_search.qnodes;
-        self.stats.cutoffs = self.ab_search.cutoffs;
+        self.stats.nodes = self.id_search.ab.nodes;
+        self.stats.qnodes = self.id_search.ab.qnodes;
+        self.stats.cutoffs = self.id_search.ab.cutoffs;
 
         if let Some(start) = self.start_time {
             self.stats.time_ms = start.elapsed().as_millis();
@@ -94,7 +91,14 @@ impl Searcher {
             return Some(book_move);
         }
 
-        self.id_search.search_with_eval(board, depth, None, &self.evaluator)
+        let result = self.id_search.search_with_eval(board, depth, None, &self.evaluator);
+
+        self.stats.nodes = self.id_search.ab.nodes;
+        self.stats.qnodes = self.id_search.ab.qnodes;
+        self.stats.cutoffs = self.id_search.ab.cutoffs;
+        self.stats.search_depth = self.id_search.depth_achieved;
+
+        result
     }
 }
 
