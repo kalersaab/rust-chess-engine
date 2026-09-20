@@ -6,6 +6,7 @@ pub mod move_ordering;
 pub mod transposition_table;
 pub mod uci;
 pub mod perft;
+pub mod opening_book;
 
 pub use board::Board;
 pub use evaluation::Evaluator;

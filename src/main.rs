@@ -1,7 +1,7 @@
 mod benchmark;
 
 use rust_chess_engine::prelude::*;
-use benchmark::{run_perft_tests, run_search_benchmarks, test_special_moves};
+use benchmark::{run_perft_tests, run_search_benchmarks, test_special_moves, test_opening_book};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -20,6 +20,9 @@ fn main() {
             }
             "--special" => {
                 test_special_moves();
+            }
+            "--book" => {
+                test_opening_book();
             }
             _ => {
                 run_tests();

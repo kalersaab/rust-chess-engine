@@ -2,6 +2,7 @@ use crate::board::Board;
 use crate::board::chess_move::ChessMove;
 use crate::evaluation::Score;
 use super::alphabeta::AlphaBeta;
+use super::aspiration::AspirationWindows;
 use crate::transposition_table::TranspositionTable;
 use crate::move_ordering::MoveOrderer;
 use std::time::{Instant, Duration};
@@ -40,6 +41,7 @@ impl IterativeDeepening {
         let mut tt = TranspositionTable::new(16);
         let mut orderer = MoveOrderer::new(max_depth);
         let mut ab = AlphaBeta::new();
+        let mut aspiration = AspirationWindows::new();
 
         self.best_move = Some(moves[0]);
 
@@ -50,7 +52,7 @@ impl IterativeDeepening {
                 }
             }
 
-            let score = ab.search(board, depth, -200000, 200000, &mut tt, &mut orderer);
+            let score = aspiration.search(&mut ab, board, depth, self.best_score, &mut tt, &mut orderer);
             
             self.best_score = score;
             self.depth_achieved = depth;

@@ -201,3 +201,108 @@ mod tests {
         assert_eq!(result.nodes, 8_902);
     }
 }
+
+pub fn test_opening_book() {
+    use rust_chess_engine::opening_book::OpeningBook;
+    use rust_chess_engine::Board;
+
+    println!("\n╔════════════════════════════════════════════════════════════════╗");
+    println!("║                 OPENING BOOK TEST SUITE                       ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+
+    let mut book = OpeningBook::new();
+
+    println!("TEST 1: LOADING EPD FILE");
+    println!("{}", "─".repeat(64));
+    
+    match book.load_epd("endgames.epd") {
+        Ok(count) => {
+            println!("✓ Successfully loaded {} positions from endgames.epd", count);
+            println!("  Book size: {} positions", book.size());
+            println!("  Book loaded: {}\n", if book.is_loaded() { "Yes" } else { "No" });
+        }
+        Err(e) => {
+            println!("✗ Failed to load opening book: {}\n", e);
+            return;
+        }
+    }
+
+    println!("TEST 2: RETRIEVING BOOK MOVES");
+    println!("{}", "─".repeat(64));
+    
+    let start_position = Board::new();
+    if let Some(book_move) = book.get_book_move(&start_position) {
+        println!("✓ Found book move in starting position");
+        println!("  Move: from {} to {}", 
+            Board::square_to_string(book_move.from),
+            Board::square_to_string(book_move.to));
+    } else {
+        println!("✗ No book move found in starting position");
+    }
+    println!();
+
+    println!("TEST 3: TESTING SPECIFIC ENDGAME POSITIONS");
+    println!("{}", "─".repeat(64));
+    
+    let endgame_fens = vec![
+        ("8/pp2nkR1/5n1p/3p4/5p2/P2BP3/1PPKN3/8 b - - 0 31", "Position 1"),
+        ("3n4/2k3p1/p4r2/1pp4P/5PB1/P6P/1KP5/5R2 w - - 0 32", "Position 2"),
+        ("4r1k1/5p1p/6pP/2b5/1p3R2/pP2BKP1/P4P2/8 b - - 0 38", "Position 3"),
+    ];
+
+    for (fen, name) in endgame_fens {
+        match Board::from_fen(fen) {
+            Ok(board) => {
+                if book.contains_position(&board) {
+                    if let Some(moves) = book.get_all_book_moves(&board) {
+                        println!("✓ {} - {} book move(s) found", name, moves.len());
+                        if let Some(best) = book.get_book_move(&board) {
+                            println!("  Best: {} → {}",
+                                Board::square_to_string(best.from),
+                                Board::square_to_string(best.to));
+                        }
+                    }
+                } else {
+                    println!("  {} - Not in book", name);
+                }
+            }
+            Err(_) => {
+                println!("✗ {} - Invalid FEN", name);
+            }
+        }
+    }
+    println!();
+
+    println!("TEST 4: ZOBRIST HASH CONSISTENCY");
+    println!("{}", "─".repeat(64));
+    
+    let board1 = Board::new();
+    let board2 = Board::new();
+    
+    let hash1 = book.position_hash(&board1);
+    let hash2 = book.position_hash(&board2);
+    
+    if hash1 == hash2 {
+        println!("✓ Same position produces same hash");
+        println!("  Hash: 0x{:016x}", hash1);
+    } else {
+        println!("✗ Hash consistency failed");
+    }
+
+    let mut board3 = Board::new();
+    board3.turn = rust_chess_engine::board::Color::Black;
+    let hash3 = book.position_hash(&board3);
+    
+    if hash1 != hash3 {
+        println!("✓ Different position produces different hash");
+        println!("  Original: 0x{:016x}", hash1);
+        println!("  Changed:  0x{:016x}", hash3);
+    } else {
+        println!("✗ Different positions produced same hash");
+    }
+    println!();
+
+    println!("╔════════════════════════════════════════════════════════════════╗");
+    println!("║              OPENING BOOK TEST SUITE COMPLETE                  ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+}
