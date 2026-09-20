@@ -1,6 +1,14 @@
 [package]
 name = "rust-chess-engine"
-version = "0.1.0"
-edition = "2024"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+name = "rust_chess_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "chess-engine"
+path = "src/main.rs"
 
 [dependencies]

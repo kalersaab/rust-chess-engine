@@ -1,4 +1,4 @@
-use super::board::{Board, Color};
+use super::board::{Board, Color, GameStatus};
 use super::chess_move::ChessMove;
 use super::pieces::*;
 
@@ -14,7 +14,6 @@ impl Board {
                     continue;
                 }
 
-                // Only generate moves for current side
                 match self.turn {
                     Color::White if !is_white(piece) => continue,
                     Color::Black if !is_black(piece) => continue,
@@ -77,7 +76,63 @@ impl Board {
 
         legal_moves
     }
-    fn is_in_check(&self, color: Color) -> bool {
+    pub fn is_checkmate(&self) -> bool {
+        self.is_in_check(self.turn)
+            && self.generate_moves().is_empty()
+    }
+
+    pub fn is_stalemate(&self) -> bool {
+        !self.is_in_check(self.turn)
+            && self.generate_moves().is_empty()
+    }
+
+    pub fn is_check(&self) -> bool {
+        self.is_in_check(self.turn)
+    }
+    pub fn game_status(&self) -> GameStatus {
+        let in_check = self.is_in_check(self.turn);
+        let legal_moves = self.generate_moves();
+
+        if legal_moves.is_empty() {
+            if in_check {
+                GameStatus::Checkmate
+            } else {
+                GameStatus::Stalemate
+            }
+        } else if in_check {
+            GameStatus::Check
+        } else {
+            GameStatus::Playing
+        }
+    }
+
+    pub fn print_game_status(&self) {
+        match self.game_status() {
+            GameStatus::Playing => {
+                println!("Status: Playing");
+            }
+
+            GameStatus::Check => {
+                println!("Status: Check");
+            }
+
+            GameStatus::Checkmate => {
+                let winner = match self.turn {
+                    Color::White => "Black",
+                    Color::Black => "White",
+                };
+
+                println!("Status: Checkmate");
+                println!("Winner: {}", winner);
+            }
+
+            GameStatus::Stalemate => {
+                println!("Status: Stalemate");
+            }
+        }
+    }
+
+    pub fn is_in_check(&self, color: Color) -> bool {
         let king_square = match self.find_king(color) {
             Some(square) => square,
             None => return false,
@@ -90,10 +145,10 @@ impl Board {
 
         self.is_square_attacked(king_square, attacking_color)
     }
-    fn is_square_attacked(
+    pub fn is_square_attacked(
         &self,
         target: (usize, usize),
-        by_color: Color,
+        by_color: crate::board::Color,
     ) -> bool {
         let (_target_rank, _target_file) = target;
 
@@ -279,7 +334,7 @@ impl Board {
 
         None
     }
-    pub(crate) fn square_to_string(square: (usize, usize)) -> String {
+    pub fn square_to_string(square: (usize, usize)) -> String {
         let (rank, file) = square;
 
         let file_char = (b'a' + file as u8) as char;
@@ -298,51 +353,65 @@ impl Board {
 
         let direction: isize;
         let start_rank: usize;
+        let promotion_rank: usize;
 
         match piece {
             Piece::WhitePawn => {
                 direction = -1;
                 start_rank = 6;
+                promotion_rank = 0;
             }
 
             Piece::BlackPawn => {
                 direction = 1;
                 start_rank = 1;
+                promotion_rank = 7;
             }
 
             _ => return,
         }
 
-        // One square forward
         let next_rank = rank as isize + direction;
 
         if next_rank >= 0
             && next_rank < 8
             && self.squares[next_rank as usize][file] == Piece::Empty
         {
-            moves.push(ChessMove::new(
-                rank,
-                file,
-                next_rank as usize,
-                file,
-            ));
+            let next_rank_usize = next_rank as usize;
+            
+            if next_rank_usize == promotion_rank {
+                let promotion_pieces = match piece {
+                    Piece::WhitePawn => [Piece::WhiteQueen, Piece::WhiteRook, Piece::WhiteBishop, Piece::WhiteKnight],
+                    Piece::BlackPawn => [Piece::BlackQueen, Piece::BlackRook, Piece::BlackBishop, Piece::BlackKnight],
+                    _ => unreachable!(),
+                };
+                
+                for promo_piece in promotion_pieces {
+                    moves.push(ChessMove::promotion(rank, file, next_rank_usize, file, promo_piece));
+                }
+            } else {
+                moves.push(ChessMove::new(
+                    rank,
+                    file,
+                    next_rank_usize,
+                    file,
+                ));
 
-            // Two squares from starting position
-            if rank == start_rank {
-                let double_rank = rank as isize + direction * 2;
+                if rank == start_rank {
+                    let double_rank = rank as isize + direction * 2;
 
-                if self.squares[double_rank as usize][file] == Piece::Empty {
-                    moves.push(ChessMove::new(
-                        rank,
-                        file,
-                        double_rank as usize,
-                        file,
-                    ));
+                    if self.squares[double_rank as usize][file] == Piece::Empty {
+                        moves.push(ChessMove::new(
+                            rank,
+                            file,
+                            double_rank as usize,
+                            file,
+                        ));
+                    }
                 }
             }
         }
 
-        // Captures
         for file_offset in [-1isize, 1isize] {
             let target_file = file as isize + file_offset;
 
@@ -354,17 +423,51 @@ impl Board {
                 continue;
             }
 
-            let target = self.squares[next_rank as usize][target_file as usize];
+            let next_rank_usize = next_rank as usize;
+            let target_file_usize = target_file as usize;
+            let target = self.squares[next_rank_usize][target_file_usize];
 
             if target != Piece::Empty
                 && same_color(piece, target) == false
             {
-                moves.push(ChessMove::new(
-                    rank,
-                    file,
-                    next_rank as usize,
-                    target_file as usize,
-                ));
+                if next_rank_usize == promotion_rank {
+                    let promotion_pieces = match piece {
+                        Piece::WhitePawn => [Piece::WhiteQueen, Piece::WhiteRook, Piece::WhiteBishop, Piece::WhiteKnight],
+                        Piece::BlackPawn => [Piece::BlackQueen, Piece::BlackRook, Piece::BlackBishop, Piece::BlackKnight],
+                        _ => unreachable!(),
+                    };
+                    
+                    for promo_piece in promotion_pieces {
+                        moves.push(ChessMove::promotion(rank, file, next_rank_usize, target_file_usize, promo_piece));
+                    }
+                } else {
+                    moves.push(ChessMove::new(
+                        rank,
+                        file,
+                        next_rank_usize,
+                        target_file_usize,
+                    ));
+                }
+            }
+        }
+
+        for file_offset in [-1isize, 1isize] {
+            let target_file = file as isize + file_offset;
+
+            if target_file < 0 || target_file >= 8 {
+                continue;
+            }
+
+            if let Some((ep_rank, ep_file)) = self.en_passant_square {
+                let next_rank_usize = next_rank as usize;
+                if next_rank >= 0 && next_rank < 8 && next_rank_usize == ep_rank && target_file as usize == ep_file {
+                    moves.push(ChessMove::en_passant(
+                        rank,
+                        file,
+                        next_rank_usize,
+                        target_file as usize,
+                    ));
+                }
             }
         }
     }
@@ -541,6 +644,68 @@ impl Board {
                     ));
                 }
             }
+        }
+
+        match piece {
+            Piece::WhiteKing => {
+                if self.castling_rights.white_kingside
+                    && rank == 7
+                    && file == 4
+                    && self.squares[7][5] == Piece::Empty
+                    && self.squares[7][6] == Piece::Empty
+                    && self.squares[7][7] == Piece::WhiteRook
+                    && !self.is_in_check(Color::White)
+                    && !self.is_square_attacked((7, 4), Color::Black)
+                    && !self.is_square_attacked((7, 5), Color::Black)
+                {
+                    moves.push(ChessMove::castling(rank, file, rank, 6));
+                }
+
+                if self.castling_rights.white_queenside
+                    && rank == 7
+                    && file == 4
+                    && self.squares[7][3] == Piece::Empty
+                    && self.squares[7][2] == Piece::Empty
+                    && self.squares[7][1] == Piece::Empty
+                    && self.squares[7][0] == Piece::WhiteRook
+                    && !self.is_in_check(Color::White)
+                    && !self.is_square_attacked((7, 4), Color::Black)
+                    && !self.is_square_attacked((7, 3), Color::Black)
+                {
+                    moves.push(ChessMove::castling(rank, file, rank, 2));
+                }
+            }
+
+            Piece::BlackKing => {
+                if self.castling_rights.black_kingside
+                    && rank == 0
+                    && file == 4
+                    && self.squares[0][5] == Piece::Empty
+                    && self.squares[0][6] == Piece::Empty
+                    && self.squares[0][7] == Piece::BlackRook
+                    && !self.is_in_check(Color::Black)
+                    && !self.is_square_attacked((0, 4), Color::White)
+                    && !self.is_square_attacked((0, 5), Color::White)
+                {
+                    moves.push(ChessMove::castling(rank, file, rank, 6));
+                }
+
+                if self.castling_rights.black_queenside
+                    && rank == 0
+                    && file == 4
+                    && self.squares[0][3] == Piece::Empty
+                    && self.squares[0][2] == Piece::Empty
+                    && self.squares[0][1] == Piece::Empty
+                    && self.squares[0][0] == Piece::BlackRook
+                    && !self.is_in_check(Color::Black)
+                    && !self.is_square_attacked((0, 4), Color::White)
+                    && !self.is_square_attacked((0, 3), Color::White)
+                {
+                    moves.push(ChessMove::castling(rank, file, rank, 2));
+                }
+            }
+
+            _ => {}
         }
     }
 }
