@@ -1,8 +1,7 @@
 pub mod board;
 pub mod chess_move;
 pub mod movegen;
-pub mod perft;
 pub mod pieces;
 
-pub use board::Board;
-pub use perft::PerftResult;
+pub use board::{Board, Color, CastlingRights};
+pub use chess_move::ChessMove;

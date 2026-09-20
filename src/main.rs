@@ -1,15 +1,30 @@
-mod board;
-mod uci;
+mod benchmark;
 
-use uci::UciEngine;
-use board::Board;
+use rust_chess_engine::prelude::*;
+use benchmark::{run_perft_tests, run_search_benchmarks, test_special_moves};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() > 1 && args[1] == "--uci" {
-        let mut engine = UciEngine::new();
-        engine.run();
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "--uci" => {
+                let mut engine = UciEngine::new();
+                engine.run();
+            }
+            "--perft" => {
+                run_perft_tests();
+            }
+            "--bench" => {
+                run_search_benchmarks();
+            }
+            "--special" => {
+                test_special_moves();
+            }
+            _ => {
+                run_tests();
+            }
+        }
     } else {
         run_tests();
     }

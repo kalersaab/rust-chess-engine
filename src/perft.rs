@@ -1,4 +1,6 @@
-use super::board::Board;
+use crate::board::Board;
+use crate::board::chess_move::MoveType;
+use crate::board::pieces::Piece;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -37,8 +39,6 @@ impl PerftResult {
 }
 
 impl Board {
-    /// Perft (Performance Test) - counts all leaf nodes at a given depth
-    /// Used to validate move generation correctness
     pub fn perft(&self, depth: u32) -> PerftResult {
         let mut result = PerftResult::new();
         self.perft_internal(depth, &mut result);
@@ -54,27 +54,22 @@ impl Board {
         let moves = self.generate_moves();
 
         for mv in moves {
-            // Count move types based on the move object itself
             match mv.move_type {
-                super::chess_move::MoveType::Castling => result.castles += 1,
-                super::chess_move::MoveType::EnPassant => result.en_passants += 1,
-                super::chess_move::MoveType::Promotion(_) => result.promotions += 1,
-                super::chess_move::MoveType::Normal => {
-                    // Check if it's a capture
-                    if self.squares[mv.to.0][mv.to.1] != super::pieces::Piece::Empty {
+                MoveType::Castling => result.castles += 1,
+                MoveType::EnPassant => result.en_passants += 1,
+                MoveType::Promotion(_) => result.promotions += 1,
+                MoveType::Normal => {
+                    if self.squares[mv.to.0][mv.to.1] != Piece::Empty {
                         result.captures += 1;
                     }
                 }
             }
 
-            // Make a copy and execute the move
             let mut next_board = self.clone();
             let from = Self::square_to_string(mv.from);
             let to = Self::square_to_string(mv.to);
 
             if next_board.make_move(&from, &to).is_ok() {
-                // After move is made, check for checks/checkmates in resulting position
-                // board.turn has been flipped, so we check if the OPPONENT (now current player) is in check
                 let is_in_check = next_board.is_in_check(next_board.turn);
                 
                 if is_in_check {
@@ -86,14 +81,11 @@ impl Board {
                     }
                 }
 
-                // Recurse with the next board state
                 next_board.perft_internal(depth - 1, result);
             }
         }
     }
 
-    /// Perft divide - shows move counts for each first move
-    /// Useful for debugging move generation
     pub fn perft_divide(&self, depth: u32) -> HashMap<String, u64> {
         let mut moves_map = HashMap::new();
         let moves = self.generate_moves();
@@ -136,7 +128,6 @@ mod tests {
 
     #[test]
     fn test_perft_kiwipete_depth_1() {
-        // Kiwipete position - good for testing special moves
         let board = Board::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")
             .expect("Failed to parse FEN");
         let result = board.perft(1);

@@ -145,10 +145,10 @@ impl Board {
 
         self.is_square_attacked(king_square, attacking_color)
     }
-    fn is_square_attacked(
+    pub fn is_square_attacked(
         &self,
         target: (usize, usize),
-        by_color: Color,
+        by_color: crate::board::Color,
     ) -> bool {
         let (_target_rank, _target_file) = target;
 
@@ -334,7 +334,7 @@ impl Board {
 
         None
     }
-    pub(crate) fn square_to_string(square: (usize, usize)) -> String {
+    pub fn square_to_string(square: (usize, usize)) -> String {
         let (rank, file) = square;
 
         let file_char = (b'a' + file as u8) as char;
@@ -371,7 +371,6 @@ impl Board {
             _ => return,
         }
 
-        // One square forward
         let next_rank = rank as isize + direction;
 
         if next_rank >= 0
@@ -380,7 +379,6 @@ impl Board {
         {
             let next_rank_usize = next_rank as usize;
             
-            // Check for promotion
             if next_rank_usize == promotion_rank {
                 let promotion_pieces = match piece {
                     Piece::WhitePawn => [Piece::WhiteQueen, Piece::WhiteRook, Piece::WhiteBishop, Piece::WhiteKnight],
@@ -399,7 +397,6 @@ impl Board {
                     file,
                 ));
 
-                // Two squares from starting position
                 if rank == start_rank {
                     let double_rank = rank as isize + direction * 2;
 
@@ -415,7 +412,6 @@ impl Board {
             }
         }
 
-        // Captures
         for file_offset in [-1isize, 1isize] {
             let target_file = file as isize + file_offset;
 
@@ -620,7 +616,6 @@ impl Board {
     ) {
         let piece = self.squares[rank][file];
 
-        // Regular king moves
         for dr in -1isize..=1 {
             for df in -1isize..=1 {
                 if dr == 0 && df == 0 {
@@ -666,7 +661,6 @@ impl Board {
                     moves.push(ChessMove::castling(rank, file, rank, 6));
                 }
 
-                // Queenside castling (e1 -> c1)
                 if self.castling_rights.white_queenside
                     && rank == 7
                     && file == 4

@@ -1,4 +1,5 @@
 use crate::board::Board;
+use crate::search::Searcher;
 use std::collections::HashMap;
 use std::io::{self, BufRead};
 
@@ -11,6 +12,7 @@ pub struct UciEngine {
     pub info: EngineInfo,
     pub board: Board,
     pub options: HashMap<String, String>,
+    pub searcher: Searcher,
 }
 
 impl UciEngine {
@@ -23,6 +25,7 @@ impl UciEngine {
             board: Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
                 .expect("Failed to create starting position"),
             options: HashMap::new(),
+            searcher: Searcher::new(),
         }
     }
 
@@ -83,6 +86,7 @@ impl UciEngine {
                     if let Ok(size) = value.parse::<u32>() {
                         if size >= 1 && size <= 256 {
                             self.options.insert(name.to_string(), value.clone());
+                            self.searcher.set_tt_size(size);
                         }
                     }
                 }
@@ -209,24 +213,28 @@ impl UciEngine {
     }
     fn cmd_go(&mut self, parts: &[&str]) {
         let mut depth = 6;
-        let mut _movetime = None;
+        let mut wtime: Option<u128> = None;
+        let mut btime: Option<u128> = None;
 
         let mut i = 1;
         while i < parts.len() {
             match parts[i] {
                 "depth" if i + 1 < parts.len() => {
                     if let Ok(d) = parts[i + 1].parse::<u32>() {
-                        depth = d;
+                        depth = d.min(20); // Cap at 20
                     }
                     i += 2;
                 }
-                "movetime" if i + 1 < parts.len() => {
-                    if let Ok(t) = parts[i + 1].parse::<u32>() {
-                        _movetime = Some(t);
+                "wtime" if i + 1 < parts.len() => {
+                    if let Ok(t) = parts[i + 1].parse::<u128>() {
+                        wtime = Some(t);
                     }
                     i += 2;
                 }
-                "wtime" | "btime" | "winc" | "binc" => {
+                "btime" if i + 1 < parts.len() => {
+                    if let Ok(t) = parts[i + 1].parse::<u128>() {
+                        btime = Some(t);
+                    }
                     i += 2;
                 }
                 "searchmoves" => {
@@ -236,7 +244,7 @@ impl UciEngine {
                     }
                 }
                 "infinite" => {
-                    depth = 20; // Max depth for infinite
+                    depth = 20;
                     i += 1;
                 }
                 _ => {
@@ -245,17 +253,29 @@ impl UciEngine {
             }
         }
 
-        let moves = self.board.generate_moves();
+        let time_ms = if self.board.turn == crate::board::Color::White {
+            wtime.unwrap_or(1000)
+        } else {
+            btime.unwrap_or(1000)
+        };
 
-        if !moves.is_empty() {
-            let best_move = moves[0];
+        let time_to_use = (time_ms * 9) / 10;
+
+        let mut board_copy = self.board.clone();
+        let (best_move_opt, achieved_depth) = 
+            self.searcher.search_with_time_management(&mut board_copy, depth, time_to_use);
+
+        if let Some(best_move) = best_move_opt {
             let move_notation = format!(
                 "{}{}",
                 Board::square_to_string(best_move.from),
                 Board::square_to_string(best_move.to)
             );
             
-            println!("info depth {} seldepth {} nodes 1", depth, depth);
+            println!(
+                "info depth {} nodes {} score cp 0 pv {} time {}",
+                achieved_depth, self.searcher.stats.nodes, move_notation, self.searcher.stats.time_ms
+            );
             println!("bestmove {}", move_notation);
         } else {
             println!("bestmove 0000"); 
