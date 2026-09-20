@@ -69,6 +69,7 @@ impl UciEngine {
         println!("id author {}", self.info.author);
         println!("option name Hash type spin default 16 min 1 max 256");
         println!("option name Depth type spin default 6 min 1 max 20");
+        println!("option name Book type check default false");
         println!("uciok");
     }
 
@@ -96,6 +97,17 @@ impl UciEngine {
                             self.options.insert(name.to_string(), value.clone());
                         }
                     }
+                }
+                "Book" => {
+                    let use_book = value.to_lowercase() == "true";
+                    if use_book {
+                        if let Err(e) = self.searcher.load_opening_book("endgames.epd") {
+                            eprintln!("Warning: Failed to load opening book: {}", e);
+                        } else {
+                            eprintln!("Opening book loaded successfully");
+                        }
+                    }
+                    self.options.insert(name.to_string(), value);
                 }
                 _ => {
                     self.options.insert(name.to_string(), value);
