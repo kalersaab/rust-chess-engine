@@ -305,11 +305,23 @@ impl Board {
 
         let mut move_type = MoveType::Normal;
         
-        if piece == Piece::WhitePawn || piece == Piece::BlackPawn {
+        if piece == Piece::WhiteKing || piece == Piece::BlackKing {
+            if (from_file as isize - to_file as isize).abs() == 2 {
+                move_type = MoveType::Castling;
+            }
+        } else if piece == Piece::WhitePawn || piece == Piece::BlackPawn {
             if let Some((ep_rank, ep_file)) = self.en_passant_square {
                 if to_rank == ep_rank && to_file == ep_file && destination == Piece::Empty {
                     move_type = MoveType::EnPassant;
                 }
+            }
+            if to_rank == 0 || to_rank == 7 {
+                let promo_piece = match piece {
+                    Piece::WhitePawn => Piece::WhiteQueen,
+                    Piece::BlackPawn => Piece::BlackQueen,
+                    _ => unreachable!(),
+                };
+                move_type = MoveType::Promotion(promo_piece);
             }
         }
 

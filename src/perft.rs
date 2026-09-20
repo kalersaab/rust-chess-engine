@@ -66,10 +66,8 @@ impl Board {
             }
 
             let mut next_board = self.clone();
-            let from = Self::square_to_string(mv.from);
-            let to = Self::square_to_string(mv.to);
 
-            if next_board.make_move(&from, &to).is_ok() {
+            if next_board.execute_move(mv.from, mv.to, mv.move_type).is_ok() {
                 let is_in_check = next_board.is_in_check(next_board.turn);
                 
                 if is_in_check {
@@ -94,9 +92,19 @@ impl Board {
             let mut board = self.clone();
             let from = Self::square_to_string(mv.from);
             let to = Self::square_to_string(mv.to);
-            let move_notation = format!("{}{}", from, to);
+            let promo_suffix = match mv.move_type {
+                MoveType::Promotion(p) => match p {
+                    Piece::WhiteQueen | Piece::BlackQueen => "q",
+                    Piece::WhiteRook | Piece::BlackRook => "r",
+                    Piece::WhiteBishop | Piece::BlackBishop => "b",
+                    Piece::WhiteKnight | Piece::BlackKnight => "n",
+                    _ => "",
+                },
+                _ => "",
+            };
+            let move_notation = format!("{}{}{}", from, to, promo_suffix);
 
-            if board.make_move(&from, &to).is_ok() {
+            if board.execute_move(mv.from, mv.to, mv.move_type).is_ok() {
                 let result = board.perft(depth - 1);
                 moves_map.insert(move_notation, result.nodes);
             }
@@ -127,10 +135,61 @@ mod tests {
     }
 
     #[test]
+    fn test_perft_starting_position_depth_3() {
+        let board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+            .expect("Failed to parse FEN");
+        let result = board.perft(3);
+        assert_eq!(result.nodes, 8_902, "Starting position depth 3 should have 8902 nodes");
+    }
+
+    #[test]
+    fn test_perft_starting_position_depth_4() {
+        let board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+            .expect("Failed to parse FEN");
+        let result = board.perft(4);
+        assert_eq!(result.nodes, 197_281, "Starting position depth 4 should have 197281 nodes");
+    }
+
+    #[test]
+    fn test_perft_starting_position_depth_5() {
+        let board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+            .expect("Failed to parse FEN");
+        let result = board.perft(5);
+        assert_eq!(result.nodes, 4_865_609, "Starting position depth 5 should have 4865609 nodes");
+    }
+
+    #[test]
     fn test_perft_kiwipete_depth_1() {
         let board = Board::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")
             .expect("Failed to parse FEN");
         let result = board.perft(1);
         assert_eq!(result.nodes, 48, "Kiwipete depth 1 should have 48 moves");
     }
+
+    #[test]
+    fn test_perft_kiwipete_depth_2() {
+        let board = Board::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")
+            .expect("Failed to parse FEN");
+        let result = board.perft(2);
+        assert_eq!(result.nodes, 2_039, "Kiwipete depth 2 should have 2039 nodes");
+    }
+
+
+
+    #[test]
+    fn test_perft_kiwipete_depth_3() {
+        let board = Board::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")
+            .expect("Failed to parse FEN");
+        let result = board.perft(3);
+        assert_eq!(result.nodes, 97_862, "Kiwipete depth 3 should have 97862 nodes");
+    }
+
+    #[test]
+    fn test_perft_kiwipete_depth_4() {
+        let board = Board::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")
+            .expect("Failed to parse FEN");
+        let result = board.perft(4);
+        assert_eq!(result.nodes, 4_085_603, "Kiwipete depth 4 should have 4085603 nodes");
+    }
 }
+

@@ -431,7 +431,6 @@ mod trainer_tests {
         let initial_output = network.forward(&features);
         let initial_loss = (initial_output - target).powi(2);
 
-        // Manual gradient step on output_bias (the simplest parameter to test)
         let output_error = 2.0 * (initial_output - target);
         {
             let w = network.get_weights_mut();
@@ -523,7 +522,6 @@ mod accumulator_tests {
         let mut board = Board::new();
         let mut acc = network.create_accumulator(&board);
 
-        // Sequence of moves: e2e4, e7e5, g1f3, b8c6
         let moves = vec![
             ("e2", "e4"),
             ("e7", "e5"),
@@ -553,3 +551,255 @@ mod accumulator_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod accumulator_stress_tests {
+    use crate::board::Board;
+    use crate::board::chess_move::MoveType;
+    use crate::nnue::NNUENetwork;
+
+    fn assert_accumulators_match(
+        updated: &crate::nnue::accumulator::NNUEAccumulator,
+        recomputed: &crate::nnue::accumulator::NNUEAccumulator,
+        network: &NNUENetwork,
+        board: &Board,
+        context: &str,
+    ) {
+        for i in 0..256 {
+            let diff = (updated.values[i] - recomputed.values[i]).abs();
+            assert!(
+                diff < 1e-4,
+                "[{}] Accumulator element {} mismatch: updated={}, recomputed={}, diff={}",
+                context, i, updated.values[i], recomputed.values[i], diff
+            );
+        }
+
+        let full_eval = network.evaluate(board);
+        let updated_eval = network.evaluate_accumulator(updated, board.turn);
+        let recomputed_eval = network.evaluate_accumulator(recomputed, board.turn);
+
+        assert_eq!(
+            updated_eval, recomputed_eval,
+            "[{}] Evaluation mismatch between updated ({}) and recomputed ({})",
+            context, updated_eval, recomputed_eval
+        );
+        assert_eq!(
+            updated_eval, full_eval,
+            "[{}] Evaluation mismatch between accumulator ({}) and full evaluate ({})",
+            context, updated_eval, full_eval
+        );
+    }
+
+    #[test]
+    fn test_stress_castling_all_flanks() {
+        let network = NNUENetwork::new();
+
+        let fens = vec![
+            "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1",
+        ];
+
+        for fen in fens {
+            let board = Board::from_fen(fen).expect("Valid FEN");
+            let moves = board.generate_moves();
+
+            for mv in moves {
+                if mv.move_type == MoveType::Castling {
+                    let acc = network.create_accumulator(&board);
+                    let updated_acc = acc.update_move(&board, &mv, &network.weights);
+
+                    let mut next_board = board.clone();
+                    next_board.execute_move(mv.from, mv.to, mv.move_type).expect("Make castling move");
+
+                    let recomputed_acc = network.create_accumulator(&next_board);
+
+                    assert_accumulators_match(
+                        &updated_acc,
+                        &recomputed_acc,
+                        &network,
+                        &next_board,
+                        &format!("Castling move {}->{}", Board::square_to_string(mv.from), Board::square_to_string(mv.to)),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_stress_en_passant() {
+        let network = NNUENetwork::new();
+
+        let fens = vec![
+            "rnbqkbnr/ppp1p1pp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2", // White EP
+            "rnbqkbnr/pppp1ppp/8/8/3Pp3/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 2", // Black EP
+        ];
+
+        for fen in fens {
+            let board = Board::from_fen(fen).expect("Valid FEN");
+            let moves = board.generate_moves();
+
+            for mv in moves {
+                if mv.move_type == MoveType::EnPassant {
+                    let acc = network.create_accumulator(&board);
+                    let updated_acc = acc.update_move(&board, &mv, &network.weights);
+
+                    let mut next_board = board.clone();
+                    next_board.execute_move(mv.from, mv.to, mv.move_type).expect("Make EP move");
+
+                    let recomputed_acc = network.create_accumulator(&next_board);
+
+                    assert_accumulators_match(
+                        &updated_acc,
+                        &recomputed_acc,
+                        &network,
+                        &next_board,
+                        &format!("En Passant move {}->{}", Board::square_to_string(mv.from), Board::square_to_string(mv.to)),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_stress_promotions() {
+        let network = NNUENetwork::new();
+
+        let fens = vec![
+            "8/4P3/8/8/8/8/4p3/8 w - - 0 1", 
+            "3r4/4P3/8/8/8/8/4p3/3R4 w - - 0 1",
+        ];
+
+        for fen in fens {
+            let board = Board::from_fen(fen).expect("Valid FEN");
+            let moves = board.generate_moves();
+
+            for mv in moves {
+                if matches!(mv.move_type, MoveType::Promotion(_)) {
+                    let acc = network.create_accumulator(&board);
+                    let updated_acc = acc.update_move(&board, &mv, &network.weights);
+
+                    let mut next_board = board.clone();
+                    let from_str = Board::square_to_string(mv.from);
+                    let to_str = Board::square_to_string(mv.to);
+
+                    next_board.execute_move(mv.from, mv.to, mv.move_type).expect("Make promotion move");
+
+                    let recomputed_acc = network.create_accumulator(&next_board);
+
+                    assert_accumulators_match(
+                        &updated_acc,
+                        &recomputed_acc,
+                        &network,
+                        &next_board,
+                        &format!("Promotion move {}->{}", from_str, to_str),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_stress_random_playouts() {
+        let network = NNUENetwork::new();
+
+        let test_fens = vec![
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+            "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+            "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+        ];
+
+        // Pseudo-random deterministic walk using LCG
+        let mut rng_state: u64 = 0xDEADBEEF;
+
+        for fen in test_fens {
+            let mut board = Board::from_fen(fen).expect("Valid FEN");
+            let mut acc = network.create_accumulator(&board);
+
+            for step in 0..150 {
+                let moves = board.generate_moves();
+                if moves.is_empty() {
+                    break;
+                }
+
+                // Pick a pseudo-random move
+                rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let move_idx = (rng_state as usize) % moves.len();
+                let mv = &moves[move_idx];
+
+                let updated_acc = acc.update_move(&board, mv, &network.weights);
+
+                let from_str = Board::square_to_string(mv.from);
+                let to_str = Board::square_to_string(mv.to);
+                board.execute_move(mv.from, mv.to, mv.move_type).expect("make move");
+
+                let recomputed_acc = network.create_accumulator(&board);
+
+                assert_accumulators_match(
+                    &updated_acc,
+                    &recomputed_acc,
+                    &network,
+                    &board,
+                    &format!("FEN step {} move {}->{}", step, from_str, to_str),
+                );
+
+                acc = updated_acc;
+            }
+        }
+    }    fn walk_perft_accumulator_tree(
+        board: &mut Board,
+        acc: &crate::nnue::accumulator::NNUEAccumulator,
+        network: &NNUENetwork,
+        depth: usize,
+        nodes_checked: &mut usize,
+    ) {
+        if depth == 0 {
+            *nodes_checked += 1;
+            return;
+        }
+
+        let moves = board.generate_moves();
+        for mv in moves {
+            let updated_acc = acc.update_move(board, &mv, &network.weights);
+            let from_str = Board::square_to_string(mv.from);
+            let to_str = Board::square_to_string(mv.to);
+
+            let mut next_board = board.clone();
+            next_board.execute_move(mv.from, mv.to, mv.move_type).expect("make move");
+
+            let recomputed_acc = network.create_accumulator(&next_board);
+
+            assert_accumulators_match(
+                &updated_acc,
+                &recomputed_acc,
+                network,
+                &next_board,
+                &format!("Depth {} tree walk move {}->{}", depth, from_str, to_str),
+            );
+
+            walk_perft_accumulator_tree(&mut next_board, &updated_acc, network, depth - 1, nodes_checked);
+        }
+    }
+
+    #[test]
+    fn test_stress_perft_tree_accumulator_walk() {
+        let network = NNUENetwork::new();
+
+        // Kiwipete position at depth 2 (2038-2039 nodes)
+        let mut kiwipete = Board::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1").expect("Valid FEN");
+        let acc = network.create_accumulator(&kiwipete);
+
+        let mut nodes_checked = 0;
+        walk_perft_accumulator_tree(&mut kiwipete, &acc, &network, 2, &mut nodes_checked);
+
+        assert!(
+            nodes_checked >= 2038 && nodes_checked <= 2039,
+            "Expected 2038..=2039 leaf nodes in Kiwipete perft depth 2, got {}",
+            nodes_checked
+        );
+    }
+}
+
+
+

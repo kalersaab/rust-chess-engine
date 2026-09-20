@@ -60,10 +60,7 @@ impl Board {
         for mv in pseudo_moves {
             let mut next_board = self.clone();
 
-            let from = Self::square_to_string(mv.from);
-            let to = Self::square_to_string(mv.to);
-
-            if next_board.make_move(&from, &to).is_err() {
+            if next_board.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
             }
 
