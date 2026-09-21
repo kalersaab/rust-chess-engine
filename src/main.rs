@@ -27,6 +27,15 @@ fn main() {
             "--book" => {
                 test_opening_book();
             }
+            "--pipeline" => {
+                run_pipeline_command(&args);
+            }
+            "--match" | "--selfplay" => {
+                run_match_command(&args);
+            }
+            "--gen-data" => {
+                run_gen_data_command(&args);
+            }
             "--probe-nnue" | "--nnue" => {
                 let path = if args.len() > 2 {
                     args[2].as_str()
@@ -42,6 +51,164 @@ fn main() {
     } else {
         run_tests();
     }
+}
+
+fn run_pipeline_command(args: &[String]) {
+    let nodes_per_move: u64 = if args.len() > 2 {
+        args[2].parse().unwrap_or(10_000)
+    } else {
+        10_000
+    };
+    let num_positions: usize = if args.len() > 3 {
+        args[3].parse().unwrap_or(300)
+    } else {
+        300
+    };
+    let num_games: usize = if args.len() > 4 {
+        args[4].parse().unwrap_or(6)
+    } else {
+        6
+    };
+
+    println!("================================================================");
+    println!("  END-TO-END NNUE PIPELINE: TRAINING -> VALIDATION -> SELF-PLAY ");
+    println!("================================================================");
+    println!("Benchmark tier:  {} nodes per move", nodes_per_move);
+    println!("Target dataset:  {} positions", num_positions);
+    println!("Self-play match: {} games\n", num_games);
+
+    // STAGE 1: REAL TRAINING DATA
+    println!("┌─────────────────────────────────────────────────────────────┐");
+    println!("│ STAGE 1: REAL TRAINING DATA GENERATION                      │");
+    println!("└─────────────────────────────────────────────────────────────┘");
+    let generator = SelfPlayGenerator::new(SelfPlayConfig {
+        nodes_per_move,
+        random_opening_plies: 6,
+        max_moves: 100,
+    });
+
+    let mut dataset = Vec::new();
+    if std::path::Path::new("endgames.epd").exists() {
+        println!("Labeling positions from endgames.epd at {} nodes...", nodes_per_move);
+        match generator.label_epd_file("endgames.epd", num_positions) {
+            Ok(pos) => dataset.extend(pos),
+            Err(e) => eprintln!("Error reading EPD: {}", e),
+        }
+    }
+    if dataset.len() < num_positions {
+        let needed_games = ((num_positions - dataset.len()) / 20).max(2);
+        println!("Generating additional {} self-play games at {} nodes...", needed_games, nodes_per_move);
+        let selfplay_pos = generator.generate_games(needed_games);
+        dataset.extend(selfplay_pos);
+    }
+    println!("Total real training dataset collected: {} positions\n", dataset.len());
+
+    // STAGE 2 & 3: TRAINED WEIGHTS & VALIDATION SET
+    println!("┌─────────────────────────────────────────────────────────────┐");
+    println!("│ STAGE 2 & 3: TRAINING WEIGHTS & VALIDATION SET EVALUATION   │");
+    println!("└─────────────────────────────────────────────────────────────┘");
+    let mut network = NNUENetwork::new();
+    let start_board = Board::new();
+    let untrained_eval = network.evaluate(&start_board);
+    println!("Untrained Startpos Eval: {:>6} cp (Random Gaussian Weights)", untrained_eval);
+
+    let trainer = NNUETrainer::new();
+    let epochs = 5;
+    let val_split = 0.15;
+    let _metrics = trainer.train_positions(&dataset, &mut network, epochs, val_split, Some("trained.nnue"))
+        .expect("Training failed");
+
+    // STAGE 4: EVALUATION SANITY CHECKS
+    println!("\n┌─────────────────────────────────────────────────────────────┐");
+    println!("│ STAGE 4: STATIC EVALUATION SANITY CHECKS                    │");
+    println!("└─────────────────────────────────────────────────────────────┘");
+    let trained_eval = network.evaluate(&start_board);
+    println!("Trained Startpos Eval:   {:>6} cp (Learned Weights)", trained_eval);
+
+    let kq_fen = "4k3/8/8/8/8/8/8/4K2Q w - - 0 1";
+    if let Ok(kq_board) = Board::from_fen(kq_fen) {
+        let kq_eval = network.evaluate(&kq_board);
+        println!("Sanity Check (K+Q vs K): {:>6} cp (Expected: strongly positive)", kq_eval);
+    }
+    let kr_fen = "4k3/8/8/8/8/8/8/4K2R w - - 0 1";
+    if let Ok(kr_board) = Board::from_fen(kr_fen) {
+        let kr_eval = network.evaluate(&kr_board);
+        println!("Sanity Check (K+R vs K): {:>6} cp (Expected: strongly positive)", kr_eval);
+    }
+
+    // STAGE 5: SELF-PLAY MATCH (FIXED NODES)
+    println!("\n┌─────────────────────────────────────────────────────────────┐");
+    println!("│ STAGE 5: HEAD-TO-HEAD SELF-PLAY MATCH (FIXED NODES)         │");
+    println!("└─────────────────────────────────────────────────────────────┘");
+    println!("Running {}-game match: NNUE (Trained) vs Handcrafted (HCE) at {} nodes...", num_games, nodes_per_move);
+    let match_runner = MatchRunner::new(nodes_per_move);
+    let result = match_runner.run_match(
+        num_games,
+        "NNUE (Trained)",
+        EvaluationMode::NNUE,
+        Some(network),
+        "Handcrafted (HCE)",
+        EvaluationMode::Handcrafted,
+        None,
+    );
+    result.display();
+}
+
+fn run_match_command(args: &[String]) {
+    let nodes_per_move: u64 = if args.len() > 2 {
+        args[2].parse().unwrap_or(10_000)
+    } else {
+        10_000
+    };
+    let num_games: usize = if args.len() > 3 {
+        args[3].parse().unwrap_or(6)
+    } else {
+        6
+    };
+
+    let nnue_network = if std::path::Path::new("trained.nnue").exists() {
+        println!("Loading weights from trained.nnue...");
+        let weights = NNUESerializer::load("trained.nnue").expect("Failed to load trained.nnue");
+        Some(NNUENetwork::from_weights(weights))
+    } else {
+        println!("Notice: trained.nnue not found. Using fresh weights (run --pipeline to train).");
+        Some(NNUENetwork::new())
+    };
+
+    let runner = MatchRunner::new(nodes_per_move);
+    let result = runner.run_match(
+        num_games,
+        "NNUE Engine",
+        EvaluationMode::NNUE,
+        nnue_network,
+        "Handcrafted HCE",
+        EvaluationMode::Handcrafted,
+        None,
+    );
+    result.display();
+}
+
+fn run_gen_data_command(args: &[String]) {
+    let num_games: usize = if args.len() > 2 {
+        args[2].parse().unwrap_or(5)
+    } else {
+        5
+    };
+    let nodes: u64 = if args.len() > 3 {
+        args[3].parse().unwrap_or(10_000)
+    } else {
+        10_000
+    };
+
+    let generator = SelfPlayGenerator::new(SelfPlayConfig {
+        nodes_per_move: nodes,
+        random_opening_plies: 6,
+        max_moves: 100,
+    });
+
+    println!("Generating {} self-play games at {} nodes per move...", num_games, nodes);
+    let positions = generator.generate_games(num_games);
+    println!("Generated {} total positions with labels.", positions.len());
 }
 
 fn probe_nnue_file(path: &str) {

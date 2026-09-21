@@ -37,6 +37,10 @@ impl Evaluator {
         }
     }
 
+    pub fn set_nnue_network(&mut self, network: crate::nnue::NNUENetwork) {
+        self.nnue_network = Some(network);
+    }
+
     pub fn set_mode(&mut self, mode: EvaluationMode) {
         self.mode = mode;
     }

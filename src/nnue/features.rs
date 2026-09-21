@@ -26,6 +26,20 @@ impl FeatureGenerator {
         features
     }
 
+    pub fn active_feature_indices(board: &Board) -> Vec<usize> {
+        let mut active = Vec::with_capacity(32);
+        for rank in 0..8 {
+            for file in 0..8 {
+                let piece = board.squares[rank][file];
+                if piece != Piece::Empty {
+                    let square_index = rank * 8 + file;
+                    active.push(Self::piece_to_feature(piece, square_index));
+                }
+            }
+        }
+        active
+    }
+
     pub fn board_to_features_incremental(
         board: &Board,
         from: (usize, usize),

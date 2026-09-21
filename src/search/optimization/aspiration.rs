@@ -53,6 +53,10 @@ impl AspirationWindows {
         loop {
             let score = ab.search_with_eval(board, depth, alpha, beta, tt, orderer, evaluator, accumulator);
 
+            if ab.is_aborted {
+                return score;
+            }
+
             if score <= alpha {
                 alpha = score - (self.window_size * 2);
                 self.re_searches += 1;

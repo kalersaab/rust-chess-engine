@@ -2,6 +2,7 @@ pub mod optimization;
 
 use crate::board::Board;
 use crate::opening_book::OpeningBook;
+use crate::evaluation::Score;
 use optimization::iterative::IterativeDeepening;
 
 #[derive(Debug, Clone, Default)]
@@ -86,6 +87,25 @@ impl Searcher {
         (best_move, self.id_search.depth_achieved)
     }
 
+    pub fn search_fixed_nodes(
+        &mut self,
+        board: &mut Board,
+        max_nodes: u64,
+    ) -> (Option<crate::board::chess_move::ChessMove>, Score) {
+        if let Some(book_move) = self.opening_book.get_book_move(board) {
+            return (Some(book_move), 0);
+        }
+
+        let mv = self.id_search.search_with_node_limit(board, max_nodes, &self.evaluator);
+        self.stats.nodes = self.id_search.ab.nodes;
+        self.stats.qnodes = self.id_search.ab.qnodes;
+        self.stats.cutoffs = self.id_search.ab.cutoffs;
+        self.stats.search_depth = self.id_search.depth_achieved;
+        self.stats.time_ms = self.id_search.time_spent_ms;
+
+        (mv, self.id_search.best_score)
+    }
+
     pub fn find_best_move(&mut self, board: &mut Board, depth: u32) -> Option<crate::board::chess_move::ChessMove> {
         if let Some(book_move) = self.opening_book.get_book_move(board) {
             return Some(book_move);
@@ -110,5 +130,16 @@ mod tests {
     fn test_searcher_creation() {
         let searcher = Searcher::new();
         assert_eq!(searcher.stats.nodes, 0);
+    }
+
+    #[test]
+    fn test_search_fixed_nodes() {
+        let mut searcher = Searcher::new();
+        let mut board = Board::new();
+        let (best_move, _score) = searcher.search_fixed_nodes(&mut board, 500);
+        assert!(best_move.is_some());
+        let total_nodes = searcher.stats.nodes + searcher.stats.qnodes;
+        assert!(total_nodes >= 50, "Should search some nodes, got {}", total_nodes);
+        assert!(total_nodes <= 1200, "Should terminate close to node limit, got {}", total_nodes);
     }
 }

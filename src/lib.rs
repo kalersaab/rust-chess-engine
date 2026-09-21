@@ -16,8 +16,8 @@ pub use uci::UciEngine;
 
 pub mod prelude {
     pub use crate::board::{Board, Color};
-    pub use crate::evaluation::Evaluator;
+    pub use crate::evaluation::{Evaluator, EvaluationMode};
     pub use crate::search::Searcher;
     pub use crate::uci::UciEngine;
-    pub use crate::nnue::{NNUENetwork, NNUETrainer, NNUESerializer};
+    pub use crate::nnue::{NNUENetwork, NNUETrainer, NNUESerializer, SelfPlayGenerator, SelfPlayConfig, MatchRunner, MatchResult};
 }
