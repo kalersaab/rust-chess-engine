@@ -19,6 +19,7 @@ pub struct SearchStats {
 
 pub struct Searcher {
     pub stats: SearchStats,
+    pub best_score: Score,
     pub tt: crate::transposition_table::TranspositionTable,
     pub move_orderer: crate::move_ordering::MoveOrderer,
     pub opening_book: OpeningBook,
@@ -26,12 +27,14 @@ pub struct Searcher {
     id_search: IterativeDeepening,
     start_time: Option<std::time::Instant>,
     time_limit: Option<std::time::Duration>,
+    stop_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Searcher {
     pub fn new() -> Self {
         Searcher {
             stats: SearchStats::default(),
+            best_score: 0,
             tt: crate::transposition_table::TranspositionTable::new(16),
             move_orderer: crate::move_ordering::MoveOrderer::new(20),
             opening_book: OpeningBook::new(),
@@ -39,6 +42,7 @@ impl Searcher {
             id_search: IterativeDeepening::new(),
             start_time: None,
             time_limit: None,
+            stop_flag: None,
         }
     }
 
@@ -52,6 +56,11 @@ impl Searcher {
 
     pub fn set_evaluation_mode(&mut self, mode: crate::evaluation::EvaluationMode) {
         self.evaluator.set_mode(mode);
+    }
+
+    pub fn set_stop_flag(&mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        self.stop_flag = Some(std::sync::Arc::clone(&flag));
+        self.id_search.set_stop_flag(flag);
     }
 
     pub fn load_opening_book<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<usize, String> {
@@ -79,6 +88,7 @@ impl Searcher {
         self.stats.nodes = self.id_search.ab.nodes;
         self.stats.qnodes = self.id_search.ab.qnodes;
         self.stats.cutoffs = self.id_search.ab.cutoffs;
+        self.best_score = self.id_search.best_score;
 
         if let Some(start) = self.start_time {
             self.stats.time_ms = start.elapsed().as_millis();
@@ -102,6 +112,7 @@ impl Searcher {
         self.stats.cutoffs = self.id_search.ab.cutoffs;
         self.stats.search_depth = self.id_search.depth_achieved;
         self.stats.time_ms = self.id_search.time_spent_ms;
+        self.best_score = self.id_search.best_score;
 
         (mv, self.id_search.best_score)
     }
@@ -117,6 +128,7 @@ impl Searcher {
         self.stats.qnodes = self.id_search.ab.qnodes;
         self.stats.cutoffs = self.id_search.ab.cutoffs;
         self.stats.search_depth = self.id_search.depth_achieved;
+        self.best_score = self.id_search.best_score;
 
         result
     }

@@ -6,6 +6,8 @@ use super::aspiration::AspirationWindows;
 use crate::transposition_table::TranspositionTable;
 use crate::move_ordering::MoveOrderer;
 use std::time::{Instant, Duration};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub struct IterativeDeepening {
     pub best_move: Option<ChessMove>,
@@ -13,6 +15,7 @@ pub struct IterativeDeepening {
     pub depth_achieved: u32,
     pub time_spent_ms: u128,
     pub ab: AlphaBeta,
+    pub stop_flag: Option<Arc<AtomicBool>>,
 }
 
 impl IterativeDeepening {
@@ -23,7 +26,19 @@ impl IterativeDeepening {
             depth_achieved: 0,
             time_spent_ms: 0,
             ab: AlphaBeta::new(),
+            stop_flag: None,
         }
+    }
+
+    pub fn set_stop_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.stop_flag = Some(Arc::clone(&flag));
+    }
+
+    fn stop_requested(&self) -> bool {
+        if let Some(ref flag) = self.stop_flag {
+            return flag.load(Ordering::Relaxed);
+        }
+        false
     }
 
     pub fn search(
@@ -54,6 +69,9 @@ impl IterativeDeepening {
         let mut tt = TranspositionTable::new(16);
         let mut orderer = MoveOrderer::new(max_depth);
         self.ab = AlphaBeta::new();
+        if let Some(ref flag) = self.stop_flag {
+            self.ab.set_stop_flag(Arc::clone(flag));
+        }
         let mut aspiration = AspirationWindows::new();
 
         let root_accumulator = if evaluator.mode != crate::evaluation::EvaluationMode::Handcrafted {
@@ -65,6 +83,9 @@ impl IterativeDeepening {
         self.best_move = Some(moves[0]);
 
         for depth in 1..=max_depth {
+            if self.stop_requested() {
+                break;
+            }
             if let Some(limit) = time_limit {
                 if start.elapsed() > limit {
                     break;
@@ -85,6 +106,10 @@ impl IterativeDeepening {
                 root_accumulator.as_ref(),
             );
             
+            if self.ab.is_aborted || self.stop_requested() {
+                break;
+            }
+
             self.best_score = score;
             self.depth_achieved = depth;
 
@@ -118,6 +143,9 @@ impl IterativeDeepening {
         let mut tt = TranspositionTable::new(16);
         let mut orderer = MoveOrderer::new(64);
         self.ab = AlphaBeta::new();
+        if let Some(ref flag) = self.stop_flag {
+            self.ab.set_stop_flag(Arc::clone(flag));
+        }
         self.ab.node_limit = Some(max_nodes);
         let mut aspiration = AspirationWindows::new();
 
@@ -130,7 +158,7 @@ impl IterativeDeepening {
         self.best_move = Some(moves[0]);
 
         for depth in 1..=64 {
-            if self.ab.total_nodes() >= max_nodes || self.ab.is_aborted {
+            if self.ab.total_nodes() >= max_nodes || self.ab.is_aborted || self.stop_requested() {
                 break;
             }
 

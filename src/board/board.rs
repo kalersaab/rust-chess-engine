@@ -100,6 +100,10 @@ impl Board {
     ) -> String {
         Self::square_to_string(square)
     }
+
+    pub fn parse_square_public(square: &str) -> Result<(usize, usize), String> {
+        parse_square(square)
+    }
     pub fn new() -> Self {
         let mut board = Board {
             squares: [[Piece::Empty; 8]; 8],

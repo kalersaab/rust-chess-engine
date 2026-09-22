@@ -3,6 +3,8 @@ use crate::evaluation::{Evaluator, Score};
 use crate::nnue::NNUEAccumulator;
 use crate::transposition_table::{TranspositionTable, BoundType};
 use crate::move_ordering::MoveOrderer;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub struct AlphaBeta {
     pub nodes: u64,
@@ -12,6 +14,7 @@ pub struct AlphaBeta {
     pub root_depth: u32,
     pub node_limit: Option<u64>,
     pub is_aborted: bool,
+    pub stop_flag: Option<Arc<AtomicBool>>,
 }
 
 impl AlphaBeta {
@@ -24,7 +27,25 @@ impl AlphaBeta {
             root_depth: 0,
             node_limit: None,
             is_aborted: false,
+            stop_flag: None,
         }
+    }
+
+    pub fn set_stop_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.stop_flag = Some(flag);
+    }
+
+    fn must_abort(&mut self) -> bool {
+        if self.is_aborted {
+            return true;
+        }
+        if let Some(ref flag) = self.stop_flag {
+            if flag.load(Ordering::Relaxed) {
+                self.is_aborted = true;
+                return true;
+            }
+        }
+        false
     }
 
     pub fn total_nodes(&self) -> u64 {
@@ -55,7 +76,7 @@ impl AlphaBeta {
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,
     ) -> Score {
-        if self.is_aborted {
+        if self.must_abort() {
             return 0;
         }
 
@@ -95,7 +116,7 @@ impl AlphaBeta {
         let mut best_score = -200000;
 
         for mv in moves {
-            if self.is_aborted {
+            if self.must_abort() {
                 break;
             }
 
@@ -156,7 +177,7 @@ impl AlphaBeta {
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,
     ) -> Score {
-        if self.is_aborted {
+        if self.must_abort() {
             return 0;
         }
 
@@ -181,7 +202,7 @@ impl AlphaBeta {
         let mut best_score = static_eval;
 
         for mv in moves {
-            if self.is_aborted {
+            if self.must_abort() {
                 break;
             }
 
@@ -210,7 +231,7 @@ impl AlphaBeta {
                 next_acc.as_ref(),
             );
 
-            if self.is_aborted {
+            if self.must_abort() {
                 return 0;
             }
 
