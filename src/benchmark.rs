@@ -238,7 +238,7 @@ pub fn run_eval_benchmark() {
     println!("✓ Accumulator Speedup:    {:>8.2}x faster than Full NNUE recomputation", speedup);
     assert!(hc_sum != 0 || nn_full_sum != 0 || nn_acc_sum != 0);
 
-    println!("\nSECTION 2: MULTI-DEPTH SEARCH THROUGHPUT (Nodes-per-Second)");
+    println!("\nSECTION 2: FIXED-NODE SEARCH THROUGHPUT (10k, 100k, 1M nodes)");
     println!("{}", "─".repeat(64));
 
     let bench_positions = vec![
@@ -247,38 +247,35 @@ pub fn run_eval_benchmark() {
         ("Tactical Endgame",  "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"),
     ];
 
-    // Cap each individual search at 500ms so the sweep stays under ~30s total.
-    let nps_time_limit_ms: u128 = 500;
+    let node_tiers = vec![("10k", 10_000u64), ("100k", 100_000u64), ("1M", 1_000_000u64)];
 
     for (pos_name, fen) in &bench_positions {
         println!("\nPosition: {}", pos_name);
         println!(
-            "  {:<5} | {:>10} | {:>10} | {:>10} | {:>10} | {:>7}",
-            "Depth", "HC Nodes", "HC NPS", "NNUE Nodes", "NNUE NPS", "Speedup"
+            "  {:<6} | {:>10} | {:>10} | {:>10} | {:>10} | {:>7}",
+            "Tier", "HC Time", "HC NPS", "NN Time", "NN NPS", "Speedup"
         );
-        println!("  {}", "─".repeat(62));
+        println!("  {}", "─".repeat(64));
 
         let test_board = Board::from_fen(fen).expect("Valid FEN");
 
-        for depth in 1u32..=5 {
+        for (tier_name, node_target) in &node_tiers {
             let mut searcher_hc = Searcher::new();
             searcher_hc.set_tt_size(16);
             searcher_hc.set_evaluation_mode(EvaluationMode::Handcrafted);
             let start_hc = Instant::now();
-            searcher_hc.search_with_time_management(&mut test_board.clone(), depth, nps_time_limit_ms);
+            searcher_hc.search_fixed_nodes(&mut test_board.clone(), *node_target);
             let time_hc = start_hc.elapsed().as_millis().max(1);
-            let hc_nodes = searcher_hc.stats.nodes;
-            let hc_partial = time_hc >= nps_time_limit_ms;
+            let hc_nodes = searcher_hc.stats.nodes + searcher_hc.stats.qnodes;
             let hc_nps = hc_nodes as f64 / (time_hc as f64 / 1000.0);
 
             let mut searcher_nn = Searcher::new();
             searcher_nn.set_tt_size(16);
             searcher_nn.set_evaluator(Evaluator::with_nnue(NNUENetwork::new()));
             let start_nn = Instant::now();
-            searcher_nn.search_with_time_management(&mut test_board.clone(), depth, nps_time_limit_ms);
+            searcher_nn.search_fixed_nodes(&mut test_board.clone(), *node_target);
             let time_nn = start_nn.elapsed().as_millis().max(1);
-            let nn_nodes = searcher_nn.stats.nodes;
-            let nn_partial = time_nn >= nps_time_limit_ms;
+            let nn_nodes = searcher_nn.stats.nodes + searcher_nn.stats.qnodes;
             let nn_nps = nn_nodes as f64 / (time_nn as f64 / 1000.0);
 
             let speedup = if hc_nps > 0.0 { nn_nps / hc_nps } else { 0.0 };
@@ -288,18 +285,14 @@ pub fn run_eval_benchmark() {
                 format!("{:.2}x ↓", speedup)
             };
 
-            // Prefix node counts with ~ when the time limit was hit (partial search).
-            let hc_nodes_str = if hc_partial { format!("~{}", hc_nodes) } else { hc_nodes.to_string() };
-            let nn_nodes_str = if nn_partial { format!("~{}", nn_nodes) } else { nn_nodes.to_string() };
-
             println!(
-                "  {:<5} | {:>10} | {:>10.0} | {:>10} | {:>10.0} | {:>7}",
-                depth, hc_nodes_str, hc_nps, nn_nodes_str, nn_nps, speedup_str
+                "  {:<6} | {:>8}ms | {:>10.0} | {:>8}ms | {:>10.0} | {:>7}",
+                tier_name, time_hc, hc_nps, time_nn, nn_nps, speedup_str
             );
         }
     }
 
-    println!("\nSECTION 3: BEST-MOVE AGREEMENT ANALYSIS (Depth 4)");
+    println!("\nSECTION 3: BEST-MOVE AGREEMENT ANALYSIS (Fixed 10k Nodes)");
     println!("{}", "─".repeat(64));
 
     let agreement_positions = vec![
@@ -313,8 +306,7 @@ pub fn run_eval_benchmark() {
         ("Middlegame",     "r1bqk2r/pp1p1ppp/2n1pn2/8/2PP4/2P2N2/P4PPP/R1BQKB1R w KQkq - 0 8"),
     ];
 
-    let agree_depth = 4u32;
-    let agree_time_limit_ms: u128 = 2_000; // 2s per evaluator per position
+    let fixed_agree_nodes = 10_000u64;
     let mut agree_count = 0usize;
     let mut total_count = 0usize;
 
@@ -330,12 +322,12 @@ pub fn run_eval_benchmark() {
         let mut s_hc = Searcher::new();
         s_hc.set_tt_size(16);
         s_hc.set_evaluation_mode(EvaluationMode::Handcrafted);
-        let (mv_hc, _) = s_hc.search_with_time_management(&mut b.clone(), agree_depth, agree_time_limit_ms);
+        let (mv_hc, _) = s_hc.search_fixed_nodes(&mut b.clone(), fixed_agree_nodes);
 
         let mut s_nn = Searcher::new();
         s_nn.set_tt_size(16);
         s_nn.set_evaluator(Evaluator::with_nnue(NNUENetwork::new()));
-        let (mv_nn, _) = s_nn.search_with_time_management(&mut b.clone(), agree_depth, agree_time_limit_ms);
+        let (mv_nn, _) = s_nn.search_fixed_nodes(&mut b.clone(), fixed_agree_nodes);
 
         let hc_str = mv_hc.map(|m| format!("{}{}", Board::square_to_string(m.from), Board::square_to_string(m.to))).unwrap_or_else(|| "none".to_string());
         let nn_str = mv_nn.map(|m| format!("{}{}", Board::square_to_string(m.from), Board::square_to_string(m.to))).unwrap_or_else(|| "none".to_string());
@@ -347,7 +339,7 @@ pub fn run_eval_benchmark() {
             "  {:<14} | {:<8} | {:<8} | {:<7} | {} / {}",
             pos_name, hc_str, nn_str,
             if agree { "✓ Match" } else { "✗ Diff " },
-            s_hc.stats.nodes, s_nn.stats.nodes
+            s_hc.stats.nodes + s_hc.stats.qnodes, s_nn.stats.nodes + s_nn.stats.qnodes
         );
     }
 

@@ -102,4 +102,67 @@ impl IterativeDeepening {
         self.time_spent_ms = start.elapsed().as_millis();
         self.best_move
     }
+
+    pub fn search_with_node_limit(
+        &mut self,
+        board: &mut Board,
+        max_nodes: u64,
+        evaluator: &crate::evaluation::Evaluator,
+    ) -> Option<ChessMove> {
+        let start = Instant::now();
+        let moves = board.generate_moves();
+        if moves.is_empty() {
+            return None;
+        }
+
+        let mut tt = TranspositionTable::new(16);
+        let mut orderer = MoveOrderer::new(64);
+        self.ab = AlphaBeta::new();
+        self.ab.node_limit = Some(max_nodes);
+        let mut aspiration = AspirationWindows::new();
+
+        let root_accumulator = if evaluator.mode != crate::evaluation::EvaluationMode::Handcrafted {
+            evaluator.nnue_network.as_ref().map(|net| net.create_accumulator(board))
+        } else {
+            None
+        };
+
+        self.best_move = Some(moves[0]);
+
+        for depth in 1..=64 {
+            if self.ab.total_nodes() >= max_nodes || self.ab.is_aborted {
+                break;
+            }
+
+            self.ab.best_move_at_root = None;
+            self.ab.root_depth = 0;
+
+            let score = aspiration.search_with_eval(
+                &mut self.ab,
+                board,
+                depth,
+                self.best_score,
+                &mut tt,
+                &mut orderer,
+                evaluator,
+                root_accumulator.as_ref(),
+            );
+
+            if !self.ab.is_aborted {
+                self.best_score = score;
+                self.depth_achieved = depth;
+                if let Some(best) = self.ab.best_move_at_root {
+                    self.best_move = Some(best);
+                }
+            } else {
+                if let Some(best) = self.ab.best_move_at_root {
+                    self.best_move = Some(best);
+                }
+                break;
+            }
+        }
+
+        self.time_spent_ms = start.elapsed().as_millis();
+        self.best_move
+    }
 }

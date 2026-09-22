@@ -801,5 +801,58 @@ mod accumulator_stress_tests {
     }
 }
 
+#[cfg(test)]
+mod selfplay_tests {
+    use crate::board::Board;
+    use crate::evaluation::EvaluationMode;
+    use crate::nnue::{SelfPlayGenerator, SelfPlayConfig, MatchRunner, NNUENetwork};
+
+    #[test]
+    fn test_selfplay_game_generation() {
+        let generator = SelfPlayGenerator::new(SelfPlayConfig {
+            nodes_per_move: 200,
+            random_opening_plies: 4,
+            max_moves: 20,
+        });
+        let positions = generator.generate_games(1);
+        assert!(!positions.is_empty(), "Should generate positions");
+        for p in &positions {
+            assert!(p.result >= 0.0 && p.result <= 1.0, "Result {} out of bounds", p.result);
+            assert!(Board::from_fen(&p.fen).is_ok(), "Invalid FEN: {}", p.fen);
+        }
+    }
+
+    #[test]
+    fn test_epd_scoring() {
+        if std::path::Path::new("endgames.epd").exists() {
+            let generator = SelfPlayGenerator::new(SelfPlayConfig {
+                nodes_per_move: 200,
+                random_opening_plies: 0,
+                max_moves: 10,
+            });
+            let positions = generator.label_epd_file("endgames.epd", 5).expect("Should label EPD");
+            assert_eq!(positions.len(), 5);
+            for p in &positions {
+                assert!(p.result >= 0.0 && p.result <= 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_match_runner_smoke() {
+        let runner = MatchRunner::new(200);
+        let result = runner.run_match(
+            2,
+            "NNUE Test",
+            EvaluationMode::NNUE,
+            Some(NNUENetwork::new()),
+            "HC Test",
+            EvaluationMode::Handcrafted,
+            None,
+        );
+        assert_eq!(result.total_games, 2);
+    }
+}
+
 
 

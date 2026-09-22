@@ -4,6 +4,7 @@ use crate::evaluation::Score;
 use super::architecture::*;
 use super::features::FeatureGenerator;
 
+#[derive(Clone)]
 pub struct NNUENetwork {
     pub weights: NNUEWeights,
 }

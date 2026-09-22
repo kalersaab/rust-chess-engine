@@ -5,12 +5,18 @@ use super::network::NNUENetwork;
 use super::features::FeatureGenerator;
 use super::pgn_loader::{GamePosition, PGNLoader};
 
+#[inline]
+pub fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
 pub struct NNUETrainer {
     pub learning_rate: f32,
     pub momentum: f32,
     pub batch_size: usize,
 }
 
+#[derive(Debug, Clone)]
 pub struct TrainingMetrics {
     pub epoch: usize,
     pub loss: f32,
@@ -21,7 +27,7 @@ pub struct TrainingMetrics {
 impl NNUETrainer {
     pub fn new() -> Self {
         NNUETrainer {
-            learning_rate: 0.001,
+            learning_rate: 0.005,
             momentum: 0.9,
             batch_size: 32,
         }
@@ -41,15 +47,30 @@ impl NNUETrainer {
             return Err("No positions loaded from PGN file".to_string());
         }
 
-        println!("Loaded {} positions", positions.len());
+        self.train_positions(&positions, network, epochs, validation_split, Some("trained.nnue"))
+    }
 
-        let split_idx = ((positions.len() as f32) * (1.0 - validation_split)) as usize;
+    pub fn train_positions(
+        &self,
+        positions: &[GamePosition],
+        network: &mut NNUENetwork,
+        epochs: usize,
+        validation_split: f32,
+        save_path: Option<&str>,
+    ) -> Result<Vec<TrainingMetrics>, String> {
+        if positions.is_empty() {
+            return Err("No positions provided for training".to_string());
+        }
+
+        let split_idx = ((positions.len() as f32) * (1.0 - validation_split).max(0.1)) as usize;
         let (train_data, validation_data) = positions.split_at(split_idx);
 
-        println!("Training set: {} positions", train_data.len());
+        println!("Dataset: {} total positions", positions.len());
+        println!("Training set:   {} positions", train_data.len());
         println!("Validation set: {} positions", validation_data.len());
 
         let mut metrics = Vec::new();
+        let mut best_val_loss = f32::MAX;
 
         for epoch in 0..epochs {
             println!("\nEpoch {}/{}", epoch + 1, epochs);
@@ -57,6 +78,17 @@ impl NNUETrainer {
             let train_loss = self.train_epoch(network, train_data)?;
             let val_loss = self.validate(network, validation_data)?;
             let accuracy = self.calculate_accuracy(network, validation_data)?;
+
+            if val_loss < best_val_loss {
+                best_val_loss = val_loss;
+                if let Some(path) = save_path {
+                    if let Err(e) = super::serialization::NNUESerializer::save(&network.weights, path) {
+                        eprintln!("Warning: Failed to save best weights: {}", e);
+                    } else {
+                        println!("  ★ New best model saved to {}", path);
+                    }
+                }
+            }
 
             metrics.push(TrainingMetrics {
                 epoch: epoch + 1,
@@ -67,57 +99,58 @@ impl NNUETrainer {
 
             println!("  Train Loss: {:.6}", train_loss);
             println!("  Val Loss:   {:.6}", val_loss);
-            println!("  Accuracy:   {:.4}", accuracy);
+            println!("  Accuracy:   {:.2}%", accuracy * 100.0);
         }
 
         Ok(metrics)
     }
 
-    fn train_epoch(
+    pub fn train_epoch(
         &self,
         network: &mut NNUENetwork,
         data: &[GamePosition],
     ) -> Result<f32, String> {
         let mut total_loss = 0.0;
-        let mut batch_count = 0;
+        let mut count = 0;
 
-        for batch in data.chunks(self.batch_size) {
-            let mut batch_loss = 0.0;
+        for position in data {
+            let board = match Board::from_fen(&position.fen) {
+                Ok(b) => b,
+                Err(e) => return Err(format!("Invalid FEN: {}", e)),
+            };
 
-            for position in batch {
-                let board = Board::from_fen(&position.fen)
-                    .map_err(|e| format!("Invalid FEN: {}", e))?;
+            let features = FeatureGenerator::board_to_features(&board);
+            let target = position.result.clamp(0.0, 1.0);
 
-                let features = FeatureGenerator::board_to_features(&board);
-                let target = position.result;
+            let (hidden, activated, output) = network.forward_full(&features);
+            let pred_prob = sigmoid(output);
 
-                let (hidden, activated, output) = network.forward_full(&features);
+            let eps = 1e-7_f32;
+            let loss = -(target * (pred_prob + eps).ln() + (1.0 - target) * (1.0 - pred_prob + eps).ln());
+            total_loss += loss;
+            count += 1;
 
-                let loss = (output - target).powi(2);
-                batch_loss += loss;
-
-                let output_error = 2.0 * (output - target);
-                self.backprop(network, &features, &hidden, &activated, output_error)?;
-            }
-
-            total_loss += batch_loss / (batch.len() as f32);
-            batch_count += 1;
+            let output_error = pred_prob - target;
+            self.backprop(&board, network, &hidden, &activated, output_error)?;
         }
 
-        Ok(total_loss / (batch_count as f32))
+        if count == 0 {
+            Ok(0.0)
+        } else {
+            Ok(total_loss / (count as f32))
+        }
     }
 
     fn backprop(
         &self,
+        board: &Board,
         network: &mut NNUENetwork,
-        features: &Array1<f32>,
         hidden: &Array1<f32>,
         activated: &Array1<f32>,
         output_error: f32,
     ) -> Result<(), String> {
+        let active_indices = FeatureGenerator::active_feature_indices(board);
         let weights = network.get_weights_mut();
-
-        let _output_grad = Array1::from_elem(OUTPUT_SIZE, output_error);
 
         weights.output_bias -= self.learning_rate * output_error;
 
@@ -134,57 +167,76 @@ impl NNUETrainer {
 
         for h in 0..HIDDEN_SIZE {
             let grad = hidden_deriv[h] * hidden_error[h];
-            weights.input_bias[h] -= self.learning_rate * grad;
-
-            for i in 0..INPUT_SIZE {
-                weights.input_weights[[h, i]] -= self.learning_rate * grad * features[i];
+            if grad.abs() > 1e-8 {
+                weights.input_bias[h] -= self.learning_rate * grad;
+                for &feat in &active_indices {
+                    weights.input_weights[[h, feat]] -= self.learning_rate * grad;
+                }
             }
         }
 
         Ok(())
     }
 
-    fn validate(
+    pub fn validate(
         &self,
         network: &NNUENetwork,
         data: &[GamePosition],
     ) -> Result<f32, String> {
+        if data.is_empty() {
+            return Ok(0.0);
+        }
         let mut total_loss = 0.0;
+        let eps = 1e-7_f32;
 
         for position in data {
-            let board = Board::from_fen(&position.fen)
-                .map_err(|e| format!("Invalid FEN: {}", e))?;
+            let board = match Board::from_fen(&position.fen) {
+                Ok(b) => b,
+                Err(e) => return Err(format!("Invalid FEN: {}", e)),
+            };
 
             let features = FeatureGenerator::board_to_features(&board);
-            let target = position.result;
+            let target = position.result.clamp(0.0, 1.0);
             let output = network.forward(&features);
+            let pred_prob = sigmoid(output);
 
-            let loss = (output - target).powi(2);
+            let loss = -(target * (pred_prob + eps).ln() + (1.0 - target) * (1.0 - pred_prob + eps).ln());
             total_loss += loss;
         }
 
         Ok(total_loss / (data.len() as f32))
     }
 
-    fn calculate_accuracy(
+    pub fn calculate_accuracy(
         &self,
         network: &NNUENetwork,
         data: &[GamePosition],
     ) -> Result<f32, String> {
+        if data.is_empty() {
+            return Ok(0.0);
+        }
         let mut correct = 0;
 
         for position in data {
-            let board = Board::from_fen(&position.fen)
-                .map_err(|e| format!("Invalid FEN: {}", e))?;
+            let board = match Board::from_fen(&position.fen) {
+                Ok(b) => b,
+                Err(e) => return Err(format!("Invalid FEN: {}", e)),
+            };
 
             let features = FeatureGenerator::board_to_features(&board);
             let target = position.result;
             let output = network.forward(&features);
+            let pred_prob = sigmoid(output);
 
-            let target_class = if target > 0.75 { 1 } else if target < 0.25 { 0 } else { 2 };
-            let output_class = if output > 0.75 { 1 } else if output < 0.25 { 0 } else { 2 };
+            let target_white_favored = target > 0.55;
+            let target_black_favored = target < 0.45;
+            let pred_white_favored = pred_prob > 0.55;
+            let pred_black_favored = pred_prob < 0.45;
 
-            if target_class == output_class || target_class == 2 || output_class == 2 {
+            if (target_white_favored && pred_white_favored)
+                || (target_black_favored && pred_black_favored)
+                || (!target_white_favored && !target_black_favored && !pred_white_favored && !pred_black_favored)
+            {
                 correct += 1;
             }
         }

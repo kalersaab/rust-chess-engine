@@ -10,6 +10,8 @@ pub struct AlphaBeta {
     pub cutoffs: u64,
     pub best_move_at_root: Option<ChessMove>,
     pub root_depth: u32,
+    pub node_limit: Option<u64>,
+    pub is_aborted: bool,
 }
 
 impl AlphaBeta {
@@ -20,7 +22,13 @@ impl AlphaBeta {
             cutoffs: 0,
             best_move_at_root: None,
             root_depth: 0,
+            node_limit: None,
+            is_aborted: false,
         }
+    }
+
+    pub fn total_nodes(&self) -> u64 {
+        self.nodes + self.qnodes
     }
 
     pub fn search(
@@ -47,6 +55,16 @@ impl AlphaBeta {
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,
     ) -> Score {
+        if self.is_aborted {
+            return 0;
+        }
+
+        if let Some(limit) = self.node_limit {
+            if self.total_nodes() >= limit {
+                self.is_aborted = true;
+                return 0;
+            }
+        }
 
         if depth > self.root_depth {
             self.root_depth = depth;
@@ -77,6 +95,10 @@ impl AlphaBeta {
         let mut best_score = -200000;
 
         for mv in moves {
+            if self.is_aborted {
+                break;
+            }
+
             let mut next_board = board.clone();
             if next_board.execute_move(mv.from, mv.to, mv.move_type).is_err() {
                 continue;
@@ -98,6 +120,10 @@ impl AlphaBeta {
                 next_acc.as_ref(),
             );
 
+            if self.is_aborted {
+                return 0;
+            }
+
             best_score = best_score.max(score);
 
             if score > alpha {
@@ -114,7 +140,9 @@ impl AlphaBeta {
             }
         }
 
-        tt.store(board, depth, best_score, BoundType::Exact);
+        if !self.is_aborted {
+            tt.store(board, depth, best_score, BoundType::Exact);
+        }
         best_score
     }
 
@@ -128,6 +156,17 @@ impl AlphaBeta {
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,
     ) -> Score {
+        if self.is_aborted {
+            return 0;
+        }
+
+        if let Some(limit) = self.node_limit {
+            if self.total_nodes() >= limit {
+                self.is_aborted = true;
+                return 0;
+            }
+        }
+
         self.qnodes += 1;
 
         let static_eval = evaluator.evaluate_with_accumulator(board, accumulator);
@@ -142,6 +181,10 @@ impl AlphaBeta {
         let mut best_score = static_eval;
 
         for mv in moves {
+            if self.is_aborted {
+                break;
+            }
+
             let target = board.squares[mv.to.0][mv.to.1];
             if target == crate::board::pieces::Piece::Empty {
                 continue;
@@ -166,6 +209,11 @@ impl AlphaBeta {
                 evaluator,
                 next_acc.as_ref(),
             );
+
+            if self.is_aborted {
+                return 0;
+            }
+
             best_score = best_score.max(score);
             alpha = alpha.max(score);
 
