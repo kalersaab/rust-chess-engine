@@ -96,15 +96,15 @@ impl NNUEAccumulator {
                         if to_f == 6 {
                             // Kingside: rook 0,7 -> 0,5
                             let rook = board_before.squares[0][7];
-                            let old_sq = 0 * 8 + 7;
-                            let new_sq = 0 * 8 + 5;
+                            let old_sq = 7;
+                            let new_sq = 5;
                             new_acc = new_acc - &weights.input_weights.column(FeatureGenerator::piece_to_feature(rook, old_sq));
                             new_acc = new_acc + &weights.input_weights.column(FeatureGenerator::piece_to_feature(rook, new_sq));
                         } else if to_f == 2 {
                             // Queenside: rook 0,0 -> 0,3
                             let rook = board_before.squares[0][0];
-                            let old_sq = 0 * 8 + 0;
-                            let new_sq = 0 * 8 + 3;
+                            let old_sq = 0;
+                            let new_sq = 3;
                             new_acc = new_acc - &weights.input_weights.column(FeatureGenerator::piece_to_feature(rook, old_sq));
                             new_acc = new_acc + &weights.input_weights.column(FeatureGenerator::piece_to_feature(rook, new_sq));
                         }

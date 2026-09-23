@@ -189,6 +189,509 @@ pub fn benchmark_search(mut board: Board, depth: u32) -> SearchBenchmark {
     }
 }
 
+pub fn run_gpu_benchmark() {
+    use rust_chess_engine::evaluation::Evaluator;
+    use rust_chess_engine::nnue::NNUENetwork;
+
+    println!("\n╔════════════════════════════════════════════════════════════════╗");
+    println!("║             GPU NNUE BATCH EVALUATOR BENCHMARK                ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+
+    let positions = [
+        ("Starting Position", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+        ("Kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"),
+    ];
+    let tiers: [(u64, &str); 2] = [(10_000, "10k"), (100_000, "100k")];
+
+    for (name, fen) in positions {
+        println!("Position: {}", name);
+        println!("{}", "═".repeat(78));
+        let board = Board::from_fen(fen).expect("Valid FEN");
+
+        for (tier, tier_name) in tiers {
+            println!("\n  Fixed nodes per move: {}", tier_name);
+            println!(
+                "  {:<6} {:>10} {:>9} {:>10} {:>12} {}",
+                "Mode", "Nodes", "QNodes", "Time", "NPS", "Best Move"
+            );
+
+            let eval_gpu = Evaluator::with_nnue(NNUENetwork::new());
+            let eval_cpu = Evaluator::with_nnue(NNUENetwork::new());
+
+            let mut s_gpu = Searcher::new();
+            s_gpu.set_tt_size(64);
+            s_gpu.set_evaluator(eval_gpu);
+            s_gpu.set_gpu_enabled(true);
+            s_gpu.set_gpu_batch_min(4);
+
+            let mut b = board.clone();
+            let (mv, _) = s_gpu.search_fixed_nodes(&mut b, 200);
+            let _ = mv;
+            let start = Instant::now();
+            let mut b = board.clone();
+            let (mv, _) = s_gpu.search_fixed_nodes(&mut b, tier);
+            let gpu_ms = start.elapsed().as_millis();
+            let gpu_nps = if gpu_ms > 0 {
+                (s_gpu.stats.nodes as f64 / gpu_ms as f64) * 1000.0
+            } else {
+                0.0
+            };
+            println!(
+                "  {:<6} {:>10} {:>9} {:>10} {:>12} {}",
+                "GPU",
+                s_gpu.stats.nodes,
+                s_gpu.stats.qnodes,
+                format!("{}ms", gpu_ms),
+                format!("{:.0}", gpu_nps),
+                board_move_string(mv),
+            );
+
+            let mut s_cpu = Searcher::new();
+            s_cpu.set_tt_size(64);
+            s_cpu.set_evaluator(eval_cpu);
+            s_cpu.set_gpu_enabled(false);
+
+            let start = Instant::now();
+            let mut b = board.clone();
+            let (mv, _) = s_cpu.search_fixed_nodes(&mut b, tier);
+            let cpu_ms = start.elapsed().as_millis();
+            let cpu_nps = if cpu_ms > 0 {
+                (s_cpu.stats.nodes as f64 / cpu_ms as f64) * 1000.0
+            } else {
+                0.0
+            };
+            println!(
+                "  {:<6} {:>10} {:>9} {:>10} {:>12} {}",
+                "CPU",
+                s_cpu.stats.nodes,
+                s_cpu.stats.qnodes,
+                format!("{}ms", cpu_ms),
+                format!("{:.0}", cpu_nps),
+                board_move_string(mv),
+            );
+            println!(
+                "  Speedup: {:.2}x (GPU vs CPU, {} nodes fixed)\n",
+                if cpu_ms > 0 { gpu_nps / cpu_nps.max(1.0) } else { 0.0 },
+                tier_name,
+            );
+        }
+        println!();
+    }
+}
+
+pub fn run_material_test() {
+    use rust_chess_engine::evaluation::Evaluator;
+    use rust_chess_engine::nnue::NNUENetwork;
+
+    println!("\n╔════════════════════════════════════════════════════════════════╗");
+    println!("║              CONTROLLED MATERIAL SANITY TEST                   ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+
+    let network = if std::path::Path::new("trained.nnue").exists() {
+        let weights = rust_chess_engine::nnue::NNUESerializer::load("trained.nnue")
+            .expect("Failed to load trained.nnue");
+        println!("Network: trained.nnue (trained weights)\n");
+        NNUENetwork::from_weights(weights)
+    } else {
+        println!("Network: fresh random weights (no trained.nnue found)\n");
+        NNUENetwork::new()
+    };
+
+    println!("All scores are from the side-to-move perspective (cp).\n");
+
+    let positions: Vec<(&str, &str)> = vec![
+        ("K vs K",   "4k3/8/8/8/8/8/8/4K3 w - - 0 1"),
+        ("K+P vs K", "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"),
+        ("K+N vs K", "4k3/8/8/8/8/8/4N3/4K3 w - - 0 1"),
+        ("K+B vs K", "4k3/8/8/8/8/8/4B3/4K3 w - - 0 1"),
+        ("K+R vs K", "4k3/8/8/8/8/8/4R3/4K3 w - - 0 1"),
+        ("K+Q vs K", "4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1"),
+        ("K vs K+Q", "4k3/8/8/8/8/8/4q3/4K3 w - - 0 1"),
+        ("Startpos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+        ("Italian",  "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 0 5"),
+        ("Sicilian", "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2"),
+        ("KQ mate1", "4k3/8/4K3/8/8/8/5Q2/8 w - - 0 1"),
+        ("KQ mate2", "8/8/8/4k3/8/4Q3/4K3/8 w - - 0 1"),
+    ];
+
+    for (name, fen) in positions {
+        println!("--- {} ---", name);
+        println!("  FEN:              {}", fen);
+        let board = Board::from_fen(fen).unwrap_or_else(|_| panic!("Invalid FEN {}", fen));
+
+        let hc = Evaluator::hand_crafted_evaluate(&board);
+        let (_h, _a, raw) = network.forward_sparse(&board);
+        let acc = network.create_accumulator(&board);
+        let acc_score = network.evaluate_accumulator(&acc, board.turn);
+        let full_score = network.evaluate(&board);
+
+        println!("  Handcrafted:      {:>8} cp", hc);
+        println!("  NNUE raw:         {:>12.5}", raw);
+        println!("  NNUE scaled:      {:>8} cp", full_score);
+        println!("  NNUE accumulator: {:>8} cp", acc_score);
+        println!();
+    }
+}
+
+fn board_move_string(mv: Option<rust_chess_engine::board::ChessMove>) -> String {
+    match mv {
+        Some(m) => format!("{}{}", Board::square_to_string(m.from), Board::square_to_string(m.to)),
+        None => "none".to_string(),
+    }
+}
+
+pub fn run_batch_eval_benchmark() {
+    use rust_chess_engine::nnue::gpu::GpuNnue;
+    use rust_chess_engine::nnue::NNUENetwork;
+
+    println!("\n╔════════════════════════════════════════════════════════════════╗");
+    println!("║        GPU BATCH EVAL vs CPU FULL-FORWARD THROUGHPUT          ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+
+    let board = Board::from_fen("r1bqk2r/pp1p1ppp/2n1pn2/8/2PP4/2P2N2/P4PPP/R1BQKB1R w KQkq - 0 8")
+        .expect("Valid FEN");
+    let network = NNUENetwork::new();
+
+    let count: usize = 16_384;
+
+    let start = Instant::now();
+    let mut cpu_sum = 0i64;
+    for _ in 0..count {
+        cpu_sum += network.evaluate(&board) as i64;
+    }
+    let cpu_ms = start.elapsed().as_millis();
+    let cpu_eps = if cpu_ms > 0 {
+        (count as f64 / cpu_ms as f64) * 1000.0
+    } else {
+        0.0
+    };
+    println!(
+        "CPU  full-forward: {:>6} evals {:>8}ms  {:>10.0} evals/s  (sum {})",
+        count, cpu_ms, cpu_eps, cpu_sum
+    );
+
+    let acc = network.create_accumulator(&board);
+    let start = Instant::now();
+    let mut acc_sum = 0i64;
+    for _ in 0..count {
+        acc_sum += network.evaluate_accumulator(&acc, board.turn) as i64;
+    }
+    let acc_ms = start.elapsed().as_millis();
+    let acc_eps = if acc_ms > 0 {
+        (count as f64 / acc_ms as f64) * 1000.0
+    } else {
+        0.0
+    };
+    println!(
+        "CPU  accumulator: {:>6} evals {:>8}ms  {:>10.0} evals/s  (sum {})",
+        count, acc_ms, acc_eps, acc_sum
+    );
+
+    let boards: Vec<_> = std::iter::repeat_n(board, count).collect();
+    let gpu = GpuNnue::from_weights(&network.weights).expect("GPU init failed");
+
+    let start = Instant::now();
+    let gpu_scores = gpu.evaluate_boards(&boards);
+    let gpu_ms = start.elapsed().as_millis();
+    let gpu_eps = if gpu_ms > 0 {
+        (count as f64 / gpu_ms as f64) * 1000.0
+    } else {
+        0.0
+    };
+    let gpu_sum: i64 = gpu_scores.iter().map(|&s| s as i64).sum();
+    println!(
+        "GPU  full-forward: {:>6} evals {:>8}ms  {:>10.0} evals/s  (sum {})",
+        count, gpu_ms, gpu_eps, gpu_sum
+    );
+    println!("Speedup vs CPU full-forward: {:.2}x", gpu_eps / cpu_eps.max(1.0));
+
+    let _ = gpu_sum;
+    println!("\nSearch uses the accumulator path (incrementally cheap), which the");
+    println!("full-forward GPU batch cannot beat in a per-node alpha-beta loop.");
+}
+
+const GPU_DEPTH_CONFIGS: &[(&str, bool, u32)] = &[
+    ("CPU-only", false, 0),
+    ("GPU d=0", true, 0),
+    ("GPU d=4", true, 4),
+    ("GPU d=8", true, 8),
+    ("GPU d=12", true, 12),
+    ("GPU d=16", true, 16),
+];
+
+const GPU_DEPTH_POSITIONS: &[(&str, &str)] = &[
+    ("Start", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+    ("Middlegame", "r1bqk2r/pp1p1ppp/2n1pn2/8/2PP4/2P2N2/P4PPP/R1BQKB1R w KQkq - 0 8"),
+    ("Kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"),
+];
+
+fn load_trained_network() -> rust_chess_engine::nnue::NNUENetwork {
+    if std::path::Path::new("trained.nnue").exists() {
+        let weights = rust_chess_engine::nnue::NNUESerializer::load("trained.nnue")
+            .expect("Failed to load trained.nnue");
+        println!("Network: trained.nnue (trained weights)\n");
+        rust_chess_engine::nnue::NNUENetwork::from_weights(weights)
+    } else {
+        println!("Network: fresh random weights (no trained.nnue found)\n");
+        rust_chess_engine::nnue::NNUENetwork::new()
+    }
+}
+
+fn searcher_for_config(
+    network: &rust_chess_engine::nnue::NNUENetwork,
+    gpu_enabled: bool,
+    gpu_max_depth: u32,
+) -> rust_chess_engine::search::Searcher {
+    let mut searcher = Searcher::new();
+    searcher.set_tt_size(64);
+    searcher.set_evaluator(rust_chess_engine::evaluation::Evaluator::with_nnue(network.clone()));
+    searcher.set_gpu_enabled(gpu_enabled);
+    searcher.set_gpu_max_depth(gpu_max_depth);
+    searcher
+}
+
+pub fn run_gpu_depth_benchmark() {
+    println!("\n╔════════════════════════════════════════════════════════════════╗");
+    println!("║          GPU MAX DEPTH SWEEP - NPS & ACHIEVED DEPTH            ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+
+    let network = load_trained_network();
+
+    println!("{}", "═".repeat(72));
+    println!("SECTION 1: FIXED-NODE SEARCH (nodes/s, equal node budget)");
+    println!("{}", "═".repeat(72));
+
+    for (label, gpu_enabled, gpu_max_depth) in GPU_DEPTH_CONFIGS {
+        let mut searcher = searcher_for_config(&network, *gpu_enabled, *gpu_max_depth);
+        println!("\n--- {} (gpu={}) ---", label, if *gpu_enabled { format!("maxdepth={}", gpu_max_depth) } else { "off".into() });
+
+        for (node_target, tier_name) in [(25_000u64, "25k"), (60_000u64, "60k")] {
+            let mut nps_sum = 0.0f64;
+            let mut time_sum = 0u128;
+            let mut nodes_sum = 0u64;
+            let mut max_depth = 0u32;
+            println!("  Fixed nodes/move: {}", tier_name);
+            for (pos_name, fen) in GPU_DEPTH_POSITIONS {
+                let board = Board::from_fen(fen).expect("Valid FEN");
+                let start = Instant::now();
+                let (_, _) = searcher.search_fixed_nodes(&mut board.clone(), node_target);
+                let ms = start.elapsed().as_millis().max(1);
+                let nodes = searcher.stats.nodes + searcher.stats.qnodes;
+                let nps = nodes as f64 / (ms as f64 / 1000.0);
+                nps_sum += nps;
+                time_sum += ms;
+                nodes_sum += nodes;
+                max_depth = max_depth.max(searcher.stats.search_depth);
+                println!(
+                    "    {:<12} {:>6}ms | {:>10.0} nps | depth {:<2} | nodes {:>10}",
+                    pos_name, ms, nps, searcher.stats.search_depth, nodes
+                );
+                if *gpu_enabled {
+                    let cfg_line = {
+                        let batch_min = searcher.stats.tail_gpu_batch_min;
+                        let batches = searcher.stats.gpu_batches;
+                        let children = searcher.stats.gpu_children_total;
+                        let hints = searcher.stats.hints_used;
+                        let q = searcher.stats.qnodes;
+                        let n = searcher.stats.nodes;
+                        format!(
+                            "  ^ gpu: {} batches, avg {:.1} children/batch (min {}), {} hints | q/n = {:.2} ({} qnodes / {} nodes)",
+                            batches,
+                            if batches > 0 { children as f64 / batches as f64 } else { 0.0 },
+                            batch_min,
+                            hints,
+                            if n > 0 { q as f64 / n as f64 } else { f64::NAN },
+                            q,
+                            n
+                        )
+                    };
+                    println!("{}", cfg_line);
+                } else if searcher.stats.qnodes > 0 {
+                    let q = searcher.stats.qnodes;
+                    let n = searcher.stats.nodes.max(1);
+                    println!(
+                        "  ^ cpu: q/n = {:.2} ({} qnodes / {} nodes)",
+                        q as f64 / n as f64,
+                        q,
+                        searcher.stats.nodes
+                    );
+                }
+            }
+            println!(
+                "    avg nps {:>10.0} | total {:>6}ms | nodes {:>10} | max depth {}",
+                nps_sum / GPU_DEPTH_POSITIONS.len() as f64,
+                time_sum,
+                nodes_sum,
+                max_depth
+            );
+        }
+    }
+
+    println!("\n{}", "═".repeat(72));
+    println!("SECTION 2: TIME-LIMITED SEARCH (700 ms/move, maxdepth 64)");
+    println!("{}", "═".repeat(72));
+
+    for (label, gpu_enabled, gpu_max_depth) in GPU_DEPTH_CONFIGS {
+        let mut searcher = searcher_for_config(&network, *gpu_enabled, *gpu_max_depth);
+        let mut depth_sum = 0u32;
+        let mut nps_sum = 0.0f64;
+        println!("\n--- {} ---", label);
+        for (pos_name, fen) in GPU_DEPTH_POSITIONS {
+            let board = Board::from_fen(fen).expect("Valid FEN");
+            let start = Instant::now();
+            let (_, depth) = searcher.search_with_time_management(&mut board.clone(), 64, 700);
+            let ms = start.elapsed().as_millis().max(1);
+            let nodes = searcher.stats.nodes + searcher.stats.qnodes;
+            let nps = nodes as f64 / (ms as f64 / 1000.0);
+            depth_sum += depth;
+            nps_sum += nps;
+            println!(
+                "    {:<12} {:>5}ms | depth {:<3} | {:>10.0} nps | nodes {:>10}",
+                pos_name, ms, depth, nps, nodes
+            );
+        }
+        println!(
+            "    avg depth {:.2} | avg nps {:>10.0}",
+            depth_sum as f64 / GPU_DEPTH_POSITIONS.len() as f64,
+            nps_sum / GPU_DEPTH_POSITIONS.len() as f64
+        );
+    }
+}
+
+fn gpu_match(
+    a_name: &str,
+    a_gpu_enabled: bool,
+    a_max_depth: u32,
+    b_name: &str,
+    b_gpu_enabled: bool,
+    b_max_depth: u32,
+    network: rust_chess_engine::nnue::NNUENetwork,
+    nodes_per_move: u64,
+    num_games: usize,
+    random_plies: usize,
+) -> rust_chess_engine::nnue::MatchResult {
+    use rand::seq::SliceRandom;
+    use rust_chess_engine::nnue::MatchResult;
+
+    let mut a_wins = 0;
+    let mut b_wins = 0;
+    let mut draws = 0;
+
+    for game_idx in 0..num_games {
+        let a_is_white = game_idx % 2 == 0;
+        let mut board = Board::new();
+
+        let mut searcher_a = searcher_for_config(&network, a_gpu_enabled, a_max_depth);
+        let mut searcher_b = searcher_for_config(&network, b_gpu_enabled, b_max_depth);
+
+        for _ in 0..random_plies {
+            let moves = board.generate_moves();
+            if moves.is_empty() {
+                break;
+            }
+            let mut rng = rand::thread_rng();
+            let chosen = *moves.choose(&mut rng).unwrap();
+            let _ = board.execute_move(chosen.from, chosen.to, chosen.move_type);
+        }
+
+        let mut game_result = 0.5_f32;
+        for _ in 0..120 {
+            if board.halfmove_clock >= 100 {
+                game_result = 0.5;
+                break;
+            }
+            let legal = board.generate_moves();
+            if legal.is_empty() {
+                if board.is_in_check(board.turn) {
+                    game_result = if board.turn == rust_chess_engine::board::Color::White { 0.0 } else { 1.0 };
+                } else {
+                    game_result = 0.5;
+                }
+                break;
+            }
+
+            let current_is_a = (board.turn == rust_chess_engine::board::Color::White && a_is_white)
+                || (board.turn == rust_chess_engine::board::Color::Black && !a_is_white);
+
+            let (best_move, score) = if current_is_a {
+                searcher_a.search_fixed_nodes(&mut board, nodes_per_move)
+            } else {
+                searcher_b.search_fixed_nodes(&mut board, nodes_per_move)
+            };
+
+            if score.abs() > 28000 {
+                let white_winning = (board.turn == rust_chess_engine::board::Color::White && score > 28000)
+                    || (board.turn == rust_chess_engine::board::Color::Black && score < -28000);
+                game_result = if white_winning { 1.0 } else { 0.0 };
+                break;
+            }
+
+            let chosen = best_move.unwrap_or(legal[0]);
+            if board.execute_move(chosen.from, chosen.to, chosen.move_type).is_err() {
+                break;
+            }
+        }
+
+        if game_result == 0.5 {
+            draws += 1;
+            println!("  Game {}: Draw", game_idx + 1);
+        } else if (game_result == 1.0 && a_is_white) || (game_result == 0.0 && !a_is_white) {
+            a_wins += 1;
+            println!("  Game {}: {} wins", game_idx + 1, a_name);
+        } else {
+            b_wins += 1;
+            println!("  Game {}: {} wins", game_idx + 1, b_name);
+        }
+    }
+
+    let total = a_wins + b_wins + draws;
+    let score = (a_wins as f64 + 0.5 * draws as f64) / (total.max(1) as f64);
+    let elo_diff = if score <= 0.001 {
+        -800.0
+    } else if score >= 0.999 {
+        800.0
+    } else {
+        -400.0 * (1.0 / score - 1.0).log10()
+    };
+
+    MatchResult {
+        engine_a_name: a_name.to_string(),
+        engine_b_name: b_name.to_string(),
+        engine_a_wins: a_wins,
+        engine_b_wins: b_wins,
+        draws,
+        total_games: total,
+        score_percentage: score,
+        elo_difference: elo_diff,
+    }
+}
+
+pub fn run_gpu_depth_matches() {
+    println!("\n╔════════════════════════════════════════════════════════════════╗");
+    println!("║          GPU MAX DEPTH SWEEP - EQUAL-NODE SELF-PLAY           ║");
+    println!("╚════════════════════════════════════════════════════════════════╝\n");
+
+    let network = load_trained_network();
+
+    let nodes_per_move: u64 = 10_000;
+    let games_per_match = 10;
+    let random_plies = 4;
+
+    for (label, gpu_enabled, gpu_max_depth) in &GPU_DEPTH_CONFIGS[0..] {
+        println!("\n>>> {} vs CPU-only ({} games, {} nodes/move) <<<",
+            label, games_per_match, nodes_per_move);
+        let result = gpu_match(
+            label, *gpu_enabled, *gpu_max_depth,
+            "CPU-only", false, 0,
+            network.clone(),
+            nodes_per_move,
+            games_per_match,
+            random_plies,
+        );
+        result.display();
+    }
+}
+
 pub fn run_eval_benchmark() {
     use rust_chess_engine::evaluation::{Evaluator, EvaluationMode};
     use rust_chess_engine::nnue::NNUENetwork;

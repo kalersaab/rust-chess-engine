@@ -21,6 +21,21 @@ fn main() {
             "--bench-eval" | "--eval-bench" => {
                 benchmark::run_eval_benchmark();
             }
+            "--bench-gpu" => {
+                benchmark::run_gpu_benchmark();
+            }
+            "--bench-gpu-depth" => {
+                benchmark::run_gpu_depth_benchmark();
+            }
+            "--bench-gpu-match" => {
+                benchmark::run_gpu_depth_matches();
+            }
+            "--bench-batch" => {
+                benchmark::run_batch_eval_benchmark();
+            }
+            "--material" => {
+                benchmark::run_material_test();
+            }
             "--special" => {
                 test_special_moves();
             }
@@ -29,6 +44,9 @@ fn main() {
             }
             "--pipeline" => {
                 run_pipeline_command(&args);
+            }
+            "--train-pgn" => {
+                run_train_pgn_command(&args);
             }
             "--match" | "--selfplay" => {
                 run_match_command(&args);
@@ -43,6 +61,14 @@ fn main() {
                     "nn-134a887f4c8f.nnue"
                 };
                 probe_nnue_file(path);
+            }
+            "--load-nnue" => {
+                let path = if args.len() > 2 {
+                    args[2].as_str()
+                } else {
+                    "nn-134a887f4c8f.nnue"
+                };
+                load_sf_nnue(path);
             }
             _ => {
                 run_tests();
@@ -154,6 +180,64 @@ fn run_pipeline_command(args: &[String]) {
     result.display();
 }
 
+fn run_train_pgn_command(args: &[String]) {
+    let pgn_path = if args.len() > 2 {
+        args[2].as_str()
+    } else {
+        eprintln!("Usage: chess-engine --train-pgn <path-to.pgn> [epochs] [max_positions] [blend]");
+        std::process::exit(1);
+    };
+    let epochs: usize = if args.len() > 3 {
+        args[3].parse().unwrap_or(5)
+    } else {
+        5
+    };
+    let max_positions: usize = if args.len() > 4 {
+        args[4].parse().unwrap_or(120_000)
+    } else {
+        120_000
+    };
+    let blend_weight: f32 = if args.len() > 5 {
+        args[5].parse().unwrap_or(0.5)
+    } else {
+        0.5
+    };
+
+    println!("================================================================");
+    println!("  NNUE TRAINING FROM REAL PGN DATASET");
+    println!("================================================================");
+    println!("PGN file:      {}", pgn_path);
+    println!("Epochs:        {}", epochs);
+    println!("Max positions: {}", max_positions);
+    println!("Label blend:   {:.2} (0.0 = pure game result, 1.0 = pure HCE)\n", blend_weight);
+
+    let mut network = NNUENetwork::new();
+    if blend_weight < 0.5 && std::path::Path::new("trained.nnue").exists() {
+        println!("Resuming from existing trained.nnue weights...");
+        let weights = rust_chess_engine::nnue::NNUESerializer::load("trained.nnue")
+            .expect("Failed to load trained.nnue");
+        network = NNUENetwork::from_weights(weights);
+    }
+    println!("Untrained Startpos Eval: {} cp", network.evaluate(&Board::new()));
+
+    let trainer = NNUETrainer::new();
+    let metrics = trainer
+        .train_from_pgn(pgn_path, &mut network, epochs, 0.15, max_positions, blend_weight)
+        .expect("Training failed");
+
+    println!("\nTraining complete. Final metrics:");
+    for m in metrics {
+        println!(
+            "  Epoch {}: train_loss={:.6} val_loss={:.6} accuracy={:.2}%",
+            m.epoch,
+            m.loss,
+            m.validation_loss,
+            m.accuracy * 100.0
+        );
+    }
+    println!("Weights saved to trained.nnue");
+}
+
 fn run_match_command(args: &[String]) {
     let nodes_per_move: u64 = if args.len() > 2 {
         args[2].parse().unwrap_or(10_000)
@@ -209,6 +293,40 @@ fn run_gen_data_command(args: &[String]) {
     println!("Generating {} self-play games at {} nodes per move...", num_games, nodes);
     let positions = generator.generate_games(num_games);
     println!("Generated {} total positions with labels.", positions.len());
+}
+
+fn load_sf_nnue(path: &str) {
+    println!("=== Load Stockfish NNUE into Engine ===\n");
+    println!("File: {}", path);
+
+    let start = std::time::Instant::now();
+    let weights = match rust_chess_engine::nnue::SFNNUELoader::load(path) {
+        Ok(weights) => weights,
+        Err(e) => {
+            eprintln!("Status: ✗ Failed to load network");
+            eprintln!("Error:  {}", e);
+            return;
+        }
+    };
+    let load_secs = start.elapsed().as_secs_f32();
+    println!("Status: ✓ Parsed SFNN network ({}s)", load_secs);
+    println!("Input weights:  {:?}", weights.input_weights.shape());
+    println!("Input bias:     {} values", weights.input_bias.len());
+    println!("Output weights: {:?}", weights.output_weights.shape());
+
+    let network = rust_chess_engine::nnue::NNUENetwork::from_weights(weights);
+    let board = Board::new();
+    let eval = network.evaluate(&board);
+    println!("Startpos eval:  {} cp", eval);
+
+    let e = std::time::Instant::now();
+    let mut acc = 0;
+    for _ in 0..50 {
+        acc += network.evaluate(&board);
+    }
+    let total = e.elapsed().as_secs_f32();
+    println!("100 evals:      {:.3}s ({:.1} evals/sec)", total, 100.0 / total);
+    let _ = acc;
 }
 
 fn probe_nnue_file(path: &str) {

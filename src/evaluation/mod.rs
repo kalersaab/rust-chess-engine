@@ -8,7 +8,7 @@ pub type Score = i32;
 use crate::board::Board;
 use material::MaterialEvaluation;
 use piece_square::PieceSquareEvaluation;
-use advanced::{PieceMobility, KingSafety, PawnStructure};
+use advanced::{PieceMobility, KingSafety, PawnStructure, RookActivity};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EvaluationMode {
@@ -33,7 +33,7 @@ impl Evaluator {
     pub fn with_nnue(network: crate::nnue::NNUENetwork) -> Self {
         Evaluator {
             nnue_network: Some(network),
-            mode: EvaluationMode::NNUE,
+            mode: EvaluationMode::Hybrid,
         }
     }
 
@@ -74,7 +74,7 @@ impl Evaluator {
                     } else {
                         network.evaluate(board)
                     };
-                    (hc_score * 3 + nn_score * 7) / 10
+                    (hc_score * 7 + nn_score * 3) / 10
                 } else {
                     hc_score
                 }
@@ -89,8 +89,9 @@ impl Evaluator {
         let mobility = PieceMobility::evaluate(board);
         let king_safety = KingSafety::evaluate(board);
         let pawn_structure = PawnStructure::evaluate(board);
+        let rook_activity = RookActivity::evaluate(board);
 
-        material + piece_square + mobility + king_safety + pawn_structure
+        material + piece_square + mobility + king_safety + pawn_structure + rook_activity
     }
 
     pub fn terminal_score(board: &Board) -> Score {
@@ -108,6 +109,14 @@ impl Evaluator {
         Ok(())
     }
 
+    pub fn load_stockfish_nnue(&mut self, path: &str) -> Result<(), String> {
+        let weights = crate::nnue::SFNNUELoader::load(path)?;
+        self.nnue_network = Some(crate::nnue::NNUENetwork::from_weights(weights));
+        self.mode = EvaluationMode::NNUE;
+        eprintln!("Loaded Stockfish NNUE successfully");
+        Ok(())
+    }
+
     pub fn enable_nnue(&mut self) {
         if self.nnue_network.is_some() {
             self.mode = EvaluationMode::NNUE;
@@ -116,6 +125,12 @@ impl Evaluator {
 
     pub fn disable_nnue(&mut self) {
         self.mode = EvaluationMode::Handcrafted;
+    }
+
+    pub fn set_hybrid(&mut self) {
+        if self.nnue_network.is_some() {
+            self.mode = EvaluationMode::Hybrid;
+        }
     }
 }
 

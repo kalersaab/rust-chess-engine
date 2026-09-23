@@ -1,7 +1,7 @@
 use ndarray::{Array1, Array2};
 
 pub const INPUT_SIZE: usize = 768;
-pub const HIDDEN_SIZE: usize = 512;
+pub const HIDDEN_SIZE: usize = 32768;
 pub const OUTPUT_SIZE: usize = 1;
 
 pub const SCALE_FACTOR: f32 = 361.0;
@@ -20,26 +20,92 @@ pub struct NNUEWeights {
 
 impl NNUEWeights {
     pub fn new() -> Self {
-        use rand_distr::Normal;
-        use rand_distr::Distribution;
+        Self::with_smart_initialization()
+    }
+
+    pub fn with_random_initialization() -> Self {
+        use rand_distr::{Normal, Distribution};
         use rand::thread_rng;
 
         let mut rng = thread_rng();
-        let normal = Normal::new(0.0, 0.01).unwrap();
+
+        let input_normal = Normal::new(0.0, 0.2).unwrap();
+        let output_normal = Normal::new(0.0, 0.1).unwrap();
 
         NNUEWeights {
             input_weights: Array2::from_shape_fn((HIDDEN_SIZE, INPUT_SIZE), |_| {
-                normal.sample(&mut rng)
+                input_normal.sample(&mut rng)
             }),
-            input_bias: Array1::from_shape_fn(HIDDEN_SIZE, |_| normal.sample(&mut rng)),
+            input_bias: Array1::from_shape_fn(HIDDEN_SIZE, |_| input_normal.sample(&mut rng)),
             hidden_weights: Array2::from_shape_fn((OUTPUT_SIZE, HIDDEN_SIZE), |_| {
-                normal.sample(&mut rng)
+                output_normal.sample(&mut rng)
             }),
-            hidden_bias: Array1::from_shape_fn(HIDDEN_SIZE, |_| normal.sample(&mut rng)),
+            hidden_bias: Array1::from_shape_fn(HIDDEN_SIZE, |_| output_normal.sample(&mut rng)),
             output_weights: Array2::from_shape_fn((OUTPUT_SIZE, HIDDEN_SIZE), |_| {
-                normal.sample(&mut rng)
+                output_normal.sample(&mut rng)
             }),
-            output_bias: normal.sample(&mut rng),
+            output_bias: output_normal.sample(&mut rng),
+        }
+    }
+
+    pub fn with_smart_initialization() -> Self {
+        use rand_distr::{Normal, Distribution};
+        use rand::thread_rng;
+
+        let mut rng = thread_rng();
+
+        let fan_in = INPUT_SIZE as f32;
+        let fan_out = HIDDEN_SIZE as f32;
+        
+        let xavier_input = (6.0 / (fan_in + fan_out)).sqrt();
+        let xavier_output = (2.0 / HIDDEN_SIZE as f32).sqrt();
+        
+        let input_normal = Normal::new(0.0, xavier_input * 0.1).unwrap();
+        let output_normal = Normal::new(0.0, xavier_output * 0.1).unwrap();
+
+        let mut weights = NNUEWeights {
+            input_weights: Array2::from_shape_fn((HIDDEN_SIZE, INPUT_SIZE), |_| {
+                input_normal.sample(&mut rng) * 0.01
+            }),
+            input_bias: Array1::zeros(HIDDEN_SIZE),
+            hidden_weights: Array2::from_shape_fn((OUTPUT_SIZE, HIDDEN_SIZE), |_| {
+                output_normal.sample(&mut rng)
+            }),
+            hidden_bias: Array1::zeros(HIDDEN_SIZE),
+            output_weights: Array2::from_shape_fn((OUTPUT_SIZE, HIDDEN_SIZE), |_| {
+                output_normal.sample(&mut rng) * 0.001
+            }),
+            output_bias: 0.0,
+        };
+
+        Self::bias_towards_material(&mut weights);
+        weights
+    }
+
+    fn bias_towards_material(weights: &mut NNUEWeights) {
+        let piece_values = [
+            100.0,  // pawn
+            320.0,  // knight
+            330.0,  // bishop
+            500.0,  // rook
+            900.0,  // queen
+            0.0,    // king (positional only)
+        ];
+
+        for piece_idx in 0..6 {
+            for square in 0..64 {
+                let white_feature = piece_idx * 64 + square;
+                let black_feature = (piece_idx + 6) * 64 + square;
+                
+                let value = piece_values[piece_idx] / SCALE_FACTOR;
+                
+                for h in 0..HIDDEN_SIZE {
+                    if h % 100 == piece_idx {
+                        weights.input_weights[[h, white_feature]] += value * 0.1;
+                        weights.input_weights[[h, black_feature]] -= value * 0.1;
+                    }
+                }
+            }
         }
     }
 

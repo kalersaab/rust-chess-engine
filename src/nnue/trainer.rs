@@ -1,5 +1,5 @@
-use ndarray::Array1;
-use crate::board::Board;
+use ndarray::{Array1, Array2};
+use crate::board::{Board, Color};
 use super::architecture::*;
 use super::network::NNUENetwork;
 use super::features::FeatureGenerator;
@@ -8,6 +8,24 @@ use super::pgn_loader::{GamePosition, PGNLoader};
 #[inline]
 pub fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
+}
+
+struct VelocityBuffers {
+    input_weights: Array2<f32>,
+    input_bias: Array1<f32>,
+    output_weights: Array2<f32>,
+    output_bias: f32,
+}
+
+impl VelocityBuffers {
+    fn zeros() -> Self {
+        VelocityBuffers {
+            input_weights: Array2::zeros((HIDDEN_SIZE, INPUT_SIZE)),
+            input_bias: Array1::zeros(HIDDEN_SIZE),
+            output_weights: Array2::zeros((OUTPUT_SIZE, HIDDEN_SIZE)),
+            output_bias: 0.0,
+        }
+    }
 }
 
 pub struct NNUETrainer {
@@ -39,12 +57,35 @@ impl NNUETrainer {
         network: &mut NNUENetwork,
         epochs: usize,
         validation_split: f32,
+        max_positions: usize,
+        blend_weight: f32,
     ) -> Result<Vec<TrainingMetrics>, String> {
         println!("Loading PGN dataset from {}...", pgn_path);
-        let positions = PGNLoader::load_pgn(pgn_path, Some(50000))?;
+        let mut positions = PGNLoader::load_pgn(pgn_path, Some(max_positions))?;
         
         if positions.is_empty() {
             return Err("No positions loaded from PGN file".to_string());
+        }
+
+        if blend_weight > 0.0 {
+            println!(
+                "Blending {} labels with handcrafted evaluation (weight {:.2})...",
+                positions.len(),
+                blend_weight
+            );
+            for pos in &mut positions {
+                if let Ok(board) = Board::from_fen(&pos.fen) {
+                    let hc = crate::evaluation::Evaluator::hand_crafted_evaluate(&board);
+                    let white_hc = if board.turn == Color::White { hc } else { -hc };
+                    let search_prob = sigmoid(white_hc as f32 / 400.0);
+                    pos.result = (1.0 - blend_weight) * pos.result + blend_weight * search_prob;
+                }
+            }
+        } else {
+            println!(
+                "Labels: {} positions with raw game results (blend disabled)",
+                positions.len()
+            );
         }
 
         self.train_positions(&positions, network, epochs, validation_split, Some("trained.nnue"))
@@ -69,13 +110,14 @@ impl NNUETrainer {
         println!("Training set:   {} positions", train_data.len());
         println!("Validation set: {} positions", validation_data.len());
 
+        let mut velocities = VelocityBuffers::zeros();
         let mut metrics = Vec::new();
         let mut best_val_loss = f32::MAX;
 
         for epoch in 0..epochs {
             println!("\nEpoch {}/{}", epoch + 1, epochs);
 
-            let train_loss = self.train_epoch(network, train_data)?;
+            let train_loss = self.train_epoch(network, train_data, &mut velocities)?;
             let val_loss = self.validate(network, validation_data)?;
             let accuracy = self.calculate_accuracy(network, validation_data)?;
 
@@ -105,10 +147,11 @@ impl NNUETrainer {
         Ok(metrics)
     }
 
-    pub fn train_epoch(
+    fn train_epoch(
         &self,
         network: &mut NNUENetwork,
         data: &[GamePosition],
+        velocities: &mut VelocityBuffers,
     ) -> Result<f32, String> {
         let mut total_loss = 0.0;
         let mut count = 0;
@@ -119,10 +162,9 @@ impl NNUETrainer {
                 Err(e) => return Err(format!("Invalid FEN: {}", e)),
             };
 
-            let features = FeatureGenerator::board_to_features(&board);
             let target = position.result.clamp(0.0, 1.0);
 
-            let (hidden, activated, output) = network.forward_full(&features);
+            let (hidden, activated, output) = network.forward_sparse(&board);
             let pred_prob = sigmoid(output);
 
             let eps = 1e-7_f32;
@@ -131,7 +173,7 @@ impl NNUETrainer {
             count += 1;
 
             let output_error = pred_prob - target;
-            self.backprop(&board, network, &hidden, &activated, output_error)?;
+            self.backprop(&board, network, &hidden, &activated, output_error, velocities)?;
         }
 
         if count == 0 {
@@ -148,14 +190,20 @@ impl NNUETrainer {
         hidden: &Array1<f32>,
         activated: &Array1<f32>,
         output_error: f32,
+        velocities: &mut VelocityBuffers,
     ) -> Result<(), String> {
         let active_indices = FeatureGenerator::active_feature_indices(board);
         let weights = network.get_weights_mut();
+        let lr = self.learning_rate;
+        let m = self.momentum;
 
-        weights.output_bias -= self.learning_rate * output_error;
+        velocities.output_bias = m * velocities.output_bias - lr * output_error;
+        weights.output_bias += velocities.output_bias;
 
         for h in 0..HIDDEN_SIZE {
-            weights.output_weights[[0, h]] -= self.learning_rate * output_error * activated[h];
+            let grad = output_error * activated[h];
+            velocities.output_weights[[0, h]] = m * velocities.output_weights[[0, h]] - lr * grad;
+            weights.output_weights[[0, h]] += velocities.output_weights[[0, h]];
         }
 
         let mut hidden_error = Array1::zeros(HIDDEN_SIZE);
@@ -168,9 +216,12 @@ impl NNUETrainer {
         for h in 0..HIDDEN_SIZE {
             let grad = hidden_deriv[h] * hidden_error[h];
             if grad.abs() > 1e-8 {
-                weights.input_bias[h] -= self.learning_rate * grad;
+                velocities.input_bias[h] = m * velocities.input_bias[h] - lr * grad;
+                weights.input_bias[h] += velocities.input_bias[h];
                 for &feat in &active_indices {
-                    weights.input_weights[[h, feat]] -= self.learning_rate * grad;
+                    velocities.input_weights[[h, feat]] =
+                        m * velocities.input_weights[[h, feat]] - lr * grad;
+                    weights.input_weights[[h, feat]] += velocities.input_weights[[h, feat]];
                 }
             }
         }
@@ -195,9 +246,8 @@ impl NNUETrainer {
                 Err(e) => return Err(format!("Invalid FEN: {}", e)),
             };
 
-            let features = FeatureGenerator::board_to_features(&board);
             let target = position.result.clamp(0.0, 1.0);
-            let output = network.forward(&features);
+            let output = network.forward_sparse(&board).2;
             let pred_prob = sigmoid(output);
 
             let loss = -(target * (pred_prob + eps).ln() + (1.0 - target) * (1.0 - pred_prob + eps).ln());
@@ -223,9 +273,8 @@ impl NNUETrainer {
                 Err(e) => return Err(format!("Invalid FEN: {}", e)),
             };
 
-            let features = FeatureGenerator::board_to_features(&board);
             let target = position.result;
-            let output = network.forward(&features);
+            let output = network.forward_sparse(&board).2;
             let pred_prob = sigmoid(output);
 
             let target_white_favored = target > 0.55;
