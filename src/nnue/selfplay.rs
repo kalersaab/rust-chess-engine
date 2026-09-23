@@ -34,8 +34,6 @@ impl SelfPlayGenerator {
         SelfPlayGenerator { config }
     }
 
-    /// Generate self-play games using classical search with random opening moves,
-    /// returning labeled positions (FEN and win probability target).
     pub fn generate_games(&self, num_games: usize) -> Vec<GamePosition> {
         let mut all_positions = Vec::new();
 
@@ -45,16 +43,14 @@ impl SelfPlayGenerator {
             searcher.set_evaluation_mode(EvaluationMode::Handcrafted);
 
             let mut game_history: Vec<(String, Color, Score)> = Vec::new();
-            let mut result = 0.5_f32; // Default draw
+            let mut result = 0.5_f32;
 
             for ply in 0..self.config.max_moves {
                 let legal_moves = board.generate_moves();
                 if legal_moves.is_empty() {
                     if board.is_in_check(board.turn) {
-                        // Checkmate: side to move lost
                         result = if board.turn == Color::White { 0.0 } else { 1.0 };
                     } else {
-                        // Stalemate
                         result = 0.5;
                     }
                     break;
@@ -68,7 +64,6 @@ impl SelfPlayGenerator {
                 let fen = board.to_fen();
 
                 let chosen_move = if ply < self.config.random_opening_plies {
-                    // Random opening ply to induce diversity
                     use rand::seq::SliceRandom;
                     let mut rng = rand::thread_rng();
                     *legal_moves.choose(&mut rng).unwrap()
@@ -76,7 +71,6 @@ impl SelfPlayGenerator {
                     let (best_move, score) = searcher.search_fixed_nodes(&mut board, self.config.nodes_per_move);
                     game_history.push((fen, board.turn, score));
 
-                    // Early adjudication if one side is overwhelmingly ahead
                     if score.abs() > 2500 {
                         let white_winning = (board.turn == Color::White && score > 2500)
                             || (board.turn == Color::Black && score < -2500);
@@ -92,8 +86,6 @@ impl SelfPlayGenerator {
                 }
             }
 
-            // Convert game positions to training samples
-            // Label is a 50/50 blend of final game outcome and search evaluation target
             for (fen, turn, score) in game_history {
                 let white_eval = if turn == Color::White { score } else { -score };
                 let search_prob = sigmoid(white_eval as f32 / 400.0);
@@ -117,7 +109,6 @@ impl SelfPlayGenerator {
         all_positions
     }
 
-    /// Label an existing EPD dataset by evaluating positions with fixed-node classical search.
     pub fn label_epd_file<P: AsRef<Path>>(
         &self,
         epd_path: P,
@@ -203,8 +194,6 @@ impl MatchRunner {
         }
     }
 
-    /// Play an N-game match between Engine A and Engine B at fixed nodes per move.
-    /// Alternates colors each game.
     pub fn run_match(
         &self,
         num_games: usize,
@@ -220,12 +209,9 @@ impl MatchRunner {
         let mut draws = 0;
 
         for game_idx in 0..num_games {
-            // Alternate colors: even games A is White, odd games B is White
             let a_is_white = game_idx % 2 == 0;
 
             let mut board = Board::new();
-
-            // Set up searchers with respective evaluators
             let mut searcher_a = Searcher::new();
             searcher_a.set_evaluation_mode(engine_a_mode);
             if let Some(ref net) = engine_a_network {
@@ -244,7 +230,6 @@ impl MatchRunner {
                 searcher_b.set_evaluator(eval);
             }
 
-            // Play random 4 plies to open different lines
             for _ in 0..4 {
                 let moves = board.generate_moves();
                 if moves.is_empty() {
@@ -283,7 +268,6 @@ impl MatchRunner {
                     searcher_b.search_fixed_nodes(&mut board, self.nodes_per_move)
                 };
 
-                // Adjudicate mate or massive score
                 if score.abs() > 28000 {
                     let white_winning = (board.turn == Color::White && score > 28000)
                         || (board.turn == Color::Black && score < -28000);
@@ -297,7 +281,6 @@ impl MatchRunner {
                 }
             }
 
-            // Determine game winner
             if game_result == 0.5 {
                 draws += 1;
                 println!("  Game {}: Draw (1/2 - 1/2)", game_idx + 1);

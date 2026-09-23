@@ -1,7 +1,7 @@
 use ndarray::{Array1, Array2};
 
 pub const INPUT_SIZE: usize = 768;
-pub const HIDDEN_SIZE: usize = 512;
+pub const HIDDEN_SIZE: usize = 32768;
 pub const OUTPUT_SIZE: usize = 1;
 
 pub const SCALE_FACTOR: f32 = 361.0;
@@ -25,21 +25,23 @@ impl NNUEWeights {
         use rand::thread_rng;
 
         let mut rng = thread_rng();
-        let normal = Normal::new(0.0, 0.01).unwrap();
+
+        let input_normal = Normal::new(0.0, 0.2).unwrap();
+        let output_normal = Normal::new(0.0, 0.1).unwrap();
 
         NNUEWeights {
             input_weights: Array2::from_shape_fn((HIDDEN_SIZE, INPUT_SIZE), |_| {
-                normal.sample(&mut rng)
+                input_normal.sample(&mut rng)
             }),
-            input_bias: Array1::from_shape_fn(HIDDEN_SIZE, |_| normal.sample(&mut rng)),
+            input_bias: Array1::from_shape_fn(HIDDEN_SIZE, |_| input_normal.sample(&mut rng)),
             hidden_weights: Array2::from_shape_fn((OUTPUT_SIZE, HIDDEN_SIZE), |_| {
-                normal.sample(&mut rng)
+                output_normal.sample(&mut rng)
             }),
-            hidden_bias: Array1::from_shape_fn(HIDDEN_SIZE, |_| normal.sample(&mut rng)),
+            hidden_bias: Array1::from_shape_fn(HIDDEN_SIZE, |_| output_normal.sample(&mut rng)),
             output_weights: Array2::from_shape_fn((OUTPUT_SIZE, HIDDEN_SIZE), |_| {
-                normal.sample(&mut rng)
+                output_normal.sample(&mut rng)
             }),
-            output_bias: normal.sample(&mut rng),
+            output_bias: output_normal.sample(&mut rng),
         }
     }
 

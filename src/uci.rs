@@ -117,6 +117,9 @@ impl UciEngine {
         println!("option name Hash type spin default 16 min 1 max 256");
         println!("option name Book type check default false");
         println!("option name Ponder type check default false");
+        println!("option name GpuEnabled type check default false");
+        println!("option name GpuBatchMin type spin default 8 min 2 max 64");
+        println!("option name GpuMaxDepth type spin default 16 min 1 max 64");
         println!("uciok");
     }
 
@@ -140,6 +143,23 @@ impl UciEngine {
                 }
                 "Book" => {
                     self.options.insert(name.to_string(), value);
+                }
+                "GpuEnabled" => {
+                    let enabled = value == "true";
+                    self.options.insert(name.to_string(), value);
+                    self.searcher.set_gpu_enabled(enabled);
+                }
+                "GpuBatchMin" => {
+                    if let Ok(min) = value.parse::<usize>() {
+                        self.options.insert(name.to_string(), value.clone());
+                        self.searcher.set_gpu_batch_min(min);
+                    }
+                }
+                "GpuMaxDepth" => {
+                    if let Ok(depth) = value.parse::<u32>() {
+                        self.options.insert(name.to_string(), value.clone());
+                        self.searcher.set_gpu_max_depth(depth);
+                    }
                 }
                 _ => {
                     self.options.insert(name.to_string(), value);

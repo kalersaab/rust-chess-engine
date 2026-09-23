@@ -7,6 +7,7 @@ pub mod trainer;
 pub mod sf_probe;
 pub mod accumulator;
 pub mod selfplay;
+pub mod gpu;
 #[cfg(test)]
 pub mod tests;
 

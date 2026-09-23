@@ -65,6 +65,18 @@ impl NNUENetwork {
         (hidden, activated, output[0])
     }
 
+    pub fn forward_sparse(&self, board: &Board) -> (Array1<f32>, Array1<f32>, f32) {
+        let mut hidden = self.weights.input_bias.clone();
+        for feat in FeatureGenerator::active_feature_indices(board) {
+            let col = self.weights.input_weights.column(feat);
+            hidden.zip_mut_with(&col, |h, &c| *h += c);
+        }
+        let activated = hidden.mapv(relu);
+        let output = self.forward_output_layer(&activated);
+
+        (hidden, activated, output[0])
+    }
+
     pub fn get_weights_mut(&mut self) -> &mut NNUEWeights {
         &mut self.weights
     }

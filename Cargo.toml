@@ -11,8 +11,19 @@ path = "src/lib.rs"
 name = "chess-engine"
 path = "src/main.rs"
 
+[[example]]
+name = "gpu_demo"
+path = "examples/gpu_demo.rs"
+
+[[example]]
+name = "gpu_benchmark"
+path = "examples/gpu_benchmark.rs"
+
 [dependencies]
 ndarray = "0.15"
 ndarray-rand = "0.14"
 rand = "0.8"
 rand_distr = "0.4"
+wgpu = "30"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "1"

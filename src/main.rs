@@ -21,6 +21,21 @@ fn main() {
             "--bench-eval" | "--eval-bench" => {
                 benchmark::run_eval_benchmark();
             }
+            "--bench-gpu" => {
+                benchmark::run_gpu_benchmark();
+            }
+            "--bench-gpu-depth" => {
+                benchmark::run_gpu_depth_benchmark();
+            }
+            "--bench-gpu-match" => {
+                benchmark::run_gpu_depth_matches();
+            }
+            "--bench-batch" => {
+                benchmark::run_batch_eval_benchmark();
+            }
+            "--material" => {
+                benchmark::run_material_test();
+            }
             "--special" => {
                 test_special_moves();
             }
@@ -29,6 +44,9 @@ fn main() {
             }
             "--pipeline" => {
                 run_pipeline_command(&args);
+            }
+            "--train-pgn" => {
+                run_train_pgn_command(&args);
             }
             "--match" | "--selfplay" => {
                 run_match_command(&args);
@@ -152,6 +170,64 @@ fn run_pipeline_command(args: &[String]) {
         None,
     );
     result.display();
+}
+
+fn run_train_pgn_command(args: &[String]) {
+    let pgn_path = if args.len() > 2 {
+        args[2].as_str()
+    } else {
+        eprintln!("Usage: chess-engine --train-pgn <path-to.pgn> [epochs] [max_positions] [blend]");
+        std::process::exit(1);
+    };
+    let epochs: usize = if args.len() > 3 {
+        args[3].parse().unwrap_or(5)
+    } else {
+        5
+    };
+    let max_positions: usize = if args.len() > 4 {
+        args[4].parse().unwrap_or(120_000)
+    } else {
+        120_000
+    };
+    let blend_weight: f32 = if args.len() > 5 {
+        args[5].parse().unwrap_or(0.5)
+    } else {
+        0.5
+    };
+
+    println!("================================================================");
+    println!("  NNUE TRAINING FROM REAL PGN DATASET");
+    println!("================================================================");
+    println!("PGN file:      {}", pgn_path);
+    println!("Epochs:        {}", epochs);
+    println!("Max positions: {}", max_positions);
+    println!("Label blend:   {:.2} (0.0 = pure game result, 1.0 = pure HCE)\n", blend_weight);
+
+    let mut network = NNUENetwork::new();
+    if blend_weight < 0.5 && std::path::Path::new("trained.nnue").exists() {
+        println!("Resuming from existing trained.nnue weights...");
+        let weights = rust_chess_engine::nnue::NNUESerializer::load("trained.nnue")
+            .expect("Failed to load trained.nnue");
+        network = NNUENetwork::from_weights(weights);
+    }
+    println!("Untrained Startpos Eval: {} cp", network.evaluate(&Board::new()));
+
+    let trainer = NNUETrainer::new();
+    let metrics = trainer
+        .train_from_pgn(pgn_path, &mut network, epochs, 0.15, max_positions, blend_weight)
+        .expect("Training failed");
+
+    println!("\nTraining complete. Final metrics:");
+    for m in metrics {
+        println!(
+            "  Epoch {}: train_loss={:.6} val_loss={:.6} accuracy={:.2}%",
+            m.epoch,
+            m.loss,
+            m.validation_loss,
+            m.accuracy * 100.0
+        );
+    }
+    println!("Weights saved to trained.nnue");
 }
 
 fn run_match_command(args: &[String]) {

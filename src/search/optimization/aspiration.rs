@@ -44,14 +44,14 @@ impl AspirationWindows {
         self.re_searches = 0;
 
         if depth < 4 {
-            return ab.search_with_eval(board, depth, -200000, 200000, tt, orderer, evaluator, accumulator);
+            return ab.search_with_eval(board, depth, -200000, 200000, tt, orderer, evaluator, accumulator, None);
         }
 
         let mut alpha = prev_score - self.window_size;
         let mut beta = prev_score + self.window_size;
 
         loop {
-            let score = ab.search_with_eval(board, depth, alpha, beta, tt, orderer, evaluator, accumulator);
+            let score = ab.search_with_eval(board, depth, alpha, beta, tt, orderer, evaluator, accumulator, None);
 
             if ab.is_aborted {
                 return score;

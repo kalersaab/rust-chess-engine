@@ -103,13 +103,17 @@ def main():
     ap.add_argument("--move-time", type=int, default=None, help="ms per move (both)")
     ap.add_argument("--nodes", default=None, help="nodes per move 'n1:n2'")
     ap.add_argument("--depth", default=None, help="depth per move 'd1:d2'")
+    ap.add_argument("--go1", default=None, help="raw go args for engine1, e.g. 'movetime 500'")
+    ap.add_argument("--go2", default=None, help="raw go args for engine2, e.g. 'depth 8'")
     ap.add_argument("--out", default=None, help="PGN output file")
     ap.add_argument("--go-timeout", type=float, default=120.0)
     args = ap.parse_args()
 
     go1 = None
     go2 = None
-    if args.move_time:
+    if args.go1 and args.go2:
+        go1, go2 = args.go1, args.go2
+    elif args.move_time:
         go1 = go2 = "movetime %d" % args.move_time
     elif args.nodes:
         n1, n2 = parse_limit(args.nodes, "1000")
