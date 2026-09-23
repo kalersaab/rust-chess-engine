@@ -8,11 +8,6 @@ use super::sf_probe::{SFNNUEProbe, SFNNUEInfo, SF_LEB128_MAGIC};
 pub struct SFNNUELoader;
 
 impl SFNNUELoader {
-    /// Load a Stockfish NNUE file and convert it to our format
-    /// 
-    /// Note: This is a simplified loader that extracts the feature transformer
-    /// and first layer stack. Full Stockfish NNUE has 8 layer stacks and complex
-    /// architecture that we approximate.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<NNUEWeights, String> {
         let info = SFNNUEProbe::probe_file(&path)?;
         
@@ -41,8 +36,6 @@ impl SFNNUELoader {
 
     fn parse_weights(data: &[u8], _info: &SFNNUEInfo) -> Result<NNUEWeights, String> {
         let mut offset = 0;
-
-        // Skip header
         offset += 4; // version
         offset += 4; // arch hash
         let desc_len = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
