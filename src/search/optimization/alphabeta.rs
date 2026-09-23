@@ -4,6 +4,7 @@ use crate::nnue::gpu::GpuNnue;
 use crate::nnue::NNUEAccumulator;
 use crate::transposition_table::{TranspositionTable, BoundType};
 use crate::move_ordering::MoveOrderer;
+use crate::search::qnode::QSearch;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ pub struct AlphaBeta {
     pub gpu_batches: u64,
     pub gpu_children_total: u64,
     pub hints_used: u64,
+    qsearch: QSearch,
 }
 
 impl AlphaBeta {
@@ -41,6 +43,7 @@ impl AlphaBeta {
             gpu_batches: 0,
             gpu_children_total: 0,
             hints_used: 0,
+            qsearch: QSearch::new(),
         }
     }
 
@@ -135,7 +138,7 @@ impl AlphaBeta {
         orderer: &mut MoveOrderer,
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,
-        stand_pat_hint: Option<Score>,
+        _stand_pat_hint: Option<Score>,
     ) -> Score {
         if self.must_abort() {
             return 0;
@@ -153,7 +156,16 @@ impl AlphaBeta {
         }
         let is_root = depth == self.root_depth;
         if depth == 0 {
-            return self.quiescence(board, alpha, beta, tt, orderer, evaluator, accumulator, stand_pat_hint);
+            let score = self.qsearch.search(
+                board,
+                alpha,
+                beta,
+                evaluator,
+                accumulator,
+                tt,
+                &mut self.qnodes,
+            );
+            return score;
         }
 
         self.nodes += 1;
@@ -272,90 +284,6 @@ impl AlphaBeta {
         if !self.is_aborted {
             tt.store(board, depth, best_score, BoundType::Exact);
         }
-        best_score
-    }
-
-    fn quiescence(
-        &mut self,
-        board: &Board,
-        mut alpha: Score,
-        beta: Score,
-        tt: &mut TranspositionTable,
-        _orderer: &MoveOrderer,
-        evaluator: &Evaluator,
-        accumulator: Option<&NNUEAccumulator>,
-        stand_pat_hint: Option<Score>,
-    ) -> Score {
-        if self.must_abort() {
-            return 0;
-        }
-
-        if let Some(limit) = self.node_limit {
-            if self.total_nodes() >= limit {
-                self.is_aborted = true;
-                return 0;
-            }
-        }
-
-        self.qnodes += 1;
-
-        let static_eval = match stand_pat_hint {
-            Some(s) => s,
-            None => evaluator.evaluate_with_accumulator(board, accumulator),
-        };
-        
-        if static_eval >= beta {
-            return beta;
-        }
-
-        alpha = alpha.max(static_eval);
-
-        let moves = board.generate_moves();
-        let mut best_score = static_eval;
-
-        for mv in moves {
-            if self.must_abort() {
-                break;
-            }
-
-            let target = board.squares[mv.to.0][mv.to.1];
-            if target == crate::board::pieces::Piece::Empty {
-                continue;
-            }
-
-            let mut board_copy = board.clone();
-            if board_copy.execute_move(mv.from, mv.to, mv.move_type).is_err() {
-                continue;
-            }
-
-            let next_acc = match (accumulator, evaluator.nnue_network.as_ref()) {
-                (Some(acc), Some(net)) => Some(acc.update_move(board, &mv, &net.weights)),
-                _ => None,
-            };
-
-            let score = -self.quiescence(
-                &board_copy,
-                -beta,
-                -alpha,
-                tt,
-                _orderer,
-                evaluator,
-                next_acc.as_ref(),
-                None,
-            );
-
-            if self.must_abort() {
-                return 0;
-            }
-
-            best_score = best_score.max(score);
-            alpha = alpha.max(score);
-
-            if alpha >= beta {
-                break;
-            }
-        }
-
         best_score
     }
 }

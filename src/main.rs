@@ -62,6 +62,14 @@ fn main() {
                 };
                 probe_nnue_file(path);
             }
+            "--load-nnue" => {
+                let path = if args.len() > 2 {
+                    args[2].as_str()
+                } else {
+                    "nn-134a887f4c8f.nnue"
+                };
+                load_sf_nnue(path);
+            }
             _ => {
                 run_tests();
             }
@@ -285,6 +293,40 @@ fn run_gen_data_command(args: &[String]) {
     println!("Generating {} self-play games at {} nodes per move...", num_games, nodes);
     let positions = generator.generate_games(num_games);
     println!("Generated {} total positions with labels.", positions.len());
+}
+
+fn load_sf_nnue(path: &str) {
+    println!("=== Load Stockfish NNUE into Engine ===\n");
+    println!("File: {}", path);
+
+    let start = std::time::Instant::now();
+    let weights = match rust_chess_engine::nnue::SFNNUELoader::load(path) {
+        Ok(weights) => weights,
+        Err(e) => {
+            eprintln!("Status: ✗ Failed to load network");
+            eprintln!("Error:  {}", e);
+            return;
+        }
+    };
+    let load_secs = start.elapsed().as_secs_f32();
+    println!("Status: ✓ Parsed SFNN network ({}s)", load_secs);
+    println!("Input weights:  {:?}", weights.input_weights.shape());
+    println!("Input bias:     {} values", weights.input_bias.len());
+    println!("Output weights: {:?}", weights.output_weights.shape());
+
+    let network = rust_chess_engine::nnue::NNUENetwork::from_weights(weights);
+    let board = Board::new();
+    let eval = network.evaluate(&board);
+    println!("Startpos eval:  {} cp", eval);
+
+    let e = std::time::Instant::now();
+    let mut acc = 0;
+    for _ in 0..50 {
+        acc += network.evaluate(&board);
+    }
+    let total = e.elapsed().as_secs_f32();
+    println!("100 evals:      {:.3}s ({:.1} evals/sec)", total, 100.0 / total);
+    let _ = acc;
 }
 
 fn probe_nnue_file(path: &str) {

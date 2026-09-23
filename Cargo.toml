@@ -11,13 +11,6 @@ path = "src/lib.rs"
 name = "chess-engine"
 path = "src/main.rs"
 
-[[example]]
-name = "gpu_demo"
-path = "examples/gpu_demo.rs"
-
-[[example]]
-name = "gpu_benchmark"
-path = "examples/gpu_benchmark.rs"
 
 [dependencies]
 ndarray = "0.15"

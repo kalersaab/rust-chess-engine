@@ -1,4 +1,5 @@
 pub mod optimization;
+pub mod qnode;
 
 use crate::board::Board;
 use crate::opening_book::OpeningBook;
