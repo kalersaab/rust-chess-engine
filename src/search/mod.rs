@@ -33,6 +33,7 @@ pub struct Searcher {
     start_time: Option<std::time::Instant>,
     time_limit: Option<std::time::Duration>,
     stop_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub threads: usize,
 }
 
 impl Searcher {
@@ -48,7 +49,12 @@ impl Searcher {
             start_time: None,
             time_limit: None,
             stop_flag: None,
+            threads: 1,
         }
+    }
+
+    pub fn set_threads(&mut self, threads: usize) {
+        self.threads = threads.clamp(1, 16);
     }
 
     pub fn set_tt_size(&mut self, size_mb: u32) {
@@ -105,7 +111,17 @@ impl Searcher {
             return (Some(book_move), 1);
         }
         
-        let best_move = self.id_search.search_with_eval(board, max_depth, Some(time_available_ms), &self.evaluator);
+        let best_move = if self.threads > 1 {
+            self.id_search.search_parallel_with_eval(
+                board,
+                max_depth,
+                Some(time_available_ms),
+                self.threads,
+                &self.evaluator,
+            )
+        } else {
+            self.id_search.search_with_eval(board, max_depth, Some(time_available_ms), &self.evaluator)
+        };
         
         self.stats.search_depth = self.id_search.depth_achieved;
         self.stats.nodes = self.id_search.ab.nodes;
@@ -220,5 +236,20 @@ mod tests {
             score_cpu,
             s_cpu.stats.nodes + s_cpu.stats.qnodes
         );
+    }
+
+    #[test]
+    fn test_parallel_search_completes() {
+        let mut searcher = Searcher::new();
+        searcher.set_threads(4);
+        let mut board = Board::new();
+        let (best_move, depth) = searcher.search_with_time_management(&mut board, 4, 60_000);
+        assert!(best_move.is_some(), "parallel search found no move");
+        let legal = board.generate_moves().iter().any(|m| Some(*m) == best_move);
+        assert!(legal, "parallel search returned illegal move {:?}", best_move);
+        assert_eq!(depth, 4, "parallel search should reach depth 4");
+        let nodes = searcher.stats.nodes + searcher.stats.qnodes;
+        assert!(nodes > 0, "parallel search searched no nodes");
+        eprintln!("threads=4 depth={} nodes={}", depth, nodes);
     }
 }

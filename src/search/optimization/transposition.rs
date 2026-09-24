@@ -6,7 +6,7 @@ pub struct TranspositionIntegration;
 
 impl TranspositionIntegration {
     pub fn probe_hash(
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         board: &Board,
         depth: u32,
         alpha: Score,
@@ -36,7 +36,7 @@ impl TranspositionIntegration {
     }
 
     pub fn store_hash(
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         board: &Board,
         depth: u32,
         score: Score,
@@ -54,7 +54,7 @@ impl TranspositionIntegration {
         tt.store(board, depth, score, bound);
     }
 
-    pub fn clear_hash(tt: &mut TranspositionTable) {
+    pub fn clear_hash(tt: &TranspositionTable) {
         tt.clear();
     }
 

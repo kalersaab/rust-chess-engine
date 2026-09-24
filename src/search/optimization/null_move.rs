@@ -48,7 +48,7 @@ impl NullMovePruning {
         depth: u32,
         beta: Score,
         static_eval: Score,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         orderer: &mut MoveOrderer,
     ) -> Option<Score> {
         if !self.can_prune(board, depth, beta, static_eval) {

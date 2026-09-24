@@ -26,7 +26,7 @@ impl PrincipalVariationSearch {
         depth: u32,
         mut alpha: Score,
         beta: Score,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         orderer: &mut MoveOrderer,
     ) -> Score {
         if depth == 0 {
@@ -91,7 +91,7 @@ impl PrincipalVariationSearch {
         board: &Board,
         mut alpha: Score,
         beta: Score,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         _orderer: &MoveOrderer,
     ) -> Score {
         self.qnodes += 1;

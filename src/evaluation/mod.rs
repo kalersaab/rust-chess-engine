@@ -5,6 +5,8 @@ pub mod advanced;
 
 pub type Score = i32;
 
+pub const EVALUATION_TEMPO: Score = 20;
+
 use crate::board::Board;
 use material::MaterialEvaluation;
 use piece_square::PieceSquareEvaluation;
@@ -92,6 +94,7 @@ impl Evaluator {
         let rook_activity = RookActivity::evaluate(board);
 
         material + piece_square + mobility + king_safety + pawn_structure + rook_activity
+            + EVALUATION_TEMPO
     }
 
     pub fn terminal_score(board: &Board) -> Score {
@@ -154,5 +157,14 @@ mod tests {
             .expect("Failed to parse FEN");
         let score = Evaluator::hand_crafted_evaluate(&board);
         assert!(score.abs() < 10000);
+    }
+
+    #[test]
+    fn test_tempo_bonus_is_exactly_symmetric() {
+        let w = Board::from_fen("8/8/8/8/8/8/8/4K2k w - - 0 1").unwrap();
+        let b = Board::from_fen("8/8/8/8/8/8/8/4K2k b - - 0 1").unwrap();
+        let ew = Evaluator::hand_crafted_evaluate(&w);
+        let eb = Evaluator::hand_crafted_evaluate(&b);
+        assert_eq!(ew + eb, 2 * EVALUATION_TEMPO);
     }
 }

@@ -21,6 +21,10 @@ fn main() {
             "--bench-eval" | "--eval-bench" => {
                 benchmark::run_eval_benchmark();
             }
+            "--eval-speed" => {
+                let iters = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(100_000);
+                benchmark::run_eval_speed_benchmark(iters);
+            }
             "--bench-gpu" => {
                 benchmark::run_gpu_benchmark();
             }

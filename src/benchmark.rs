@@ -692,6 +692,35 @@ pub fn run_gpu_depth_matches() {
     }
 }
 
+pub fn run_eval_speed_benchmark(iterations: usize) {
+    use rust_chess_engine::evaluation::Evaluator;
+    use std::time::Instant;
+
+    let boards = [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r1bqk2r/pp1p1ppp/2n1pn2/8/2PP4/2P2N2/P4PPP/R1BQKB1R w KQkq - 0 8",
+        "4k3/8/8/8/8/8/6q1/5rk1 w - - 0 1",
+    ];
+
+    for fen in &boards {
+        let board = Board::from_fen(fen).expect("Valid FEN");
+        let mut sum = 0i64;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            sum += Evaluator::hand_crafted_evaluate(&board) as i64;
+        }
+        let elapsed = start.elapsed();
+        let eps = iterations as f64 / elapsed.as_secs_f64();
+        println!(
+            "{:<4} keval/s | {:>6.1} us/eval | sum={} | {}",
+            eps / 1_000.0,
+            elapsed.as_secs_f64() * 1e6 / iterations as f64,
+            sum,
+            fen
+        );
+    }
+}
+
 pub fn run_eval_benchmark() {
     use rust_chess_engine::evaluation::{Evaluator, EvaluationMode};
     use rust_chess_engine::nnue::NNUENetwork;

@@ -23,7 +23,7 @@ impl AspirationWindows {
         board: &mut Board,
         depth: u32,
         prev_score: Score,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         orderer: &mut MoveOrderer,
     ) -> Score {
         let evaluator = crate::evaluation::Evaluator::new();
@@ -36,7 +36,7 @@ impl AspirationWindows {
         board: &mut Board,
         depth: u32,
         prev_score: Score,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         orderer: &mut MoveOrderer,
         evaluator: &crate::evaluation::Evaluator,
         accumulator: Option<&crate::nnue::NNUEAccumulator>,

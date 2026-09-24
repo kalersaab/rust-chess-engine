@@ -1,6 +1,8 @@
 use crate::board::Board;
 use crate::evaluation::Score;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundType {
@@ -19,41 +21,55 @@ pub struct TranspositionEntry {
 }
 
 pub struct TranspositionTable {
-    entries: HashMap<u64, TranspositionEntry>,
-    age: u32,
-    max_entries: usize,
-    hits: u64,
-    misses: u64,
-    collisions: u64,
+    shards: Vec<Mutex<HashMap<u64, TranspositionEntry>>>,
+    age: AtomicU32,
+    per_shard: usize,
+    hits: AtomicU64,
+    misses: AtomicU64,
+    collisions: AtomicU64,
 }
+
+const NUM_SHARDS: usize = 64;
 
 impl TranspositionTable {
     pub fn new(size_mb: u32) -> Self {
         let max_entries = (size_mb as usize * 1024 * 1024) / 32;
+        let per_shard = (max_entries / NUM_SHARDS).max(16);
+        let mut shards = Vec::with_capacity(NUM_SHARDS);
+        for _ in 0..NUM_SHARDS {
+            shards.push(Mutex::new(HashMap::with_capacity(per_shard)));
+        }
         TranspositionTable {
-            entries: HashMap::with_capacity(max_entries),
-            age: 0,
-            max_entries,
-            hits: 0,
-            misses: 0,
-            collisions: 0,
+            shards,
+            age: AtomicU32::new(0),
+            per_shard,
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+            collisions: AtomicU64::new(0),
         }
     }
 
+    fn shard_index(hash: u64) -> usize {
+        ((hash >> 48) as usize) & (NUM_SHARDS - 1)
+    }
+
     pub fn store(
-        &mut self,
+        &self,
         board: &Board,
         depth: u32,
         score: Score,
         bound: BoundType,
     ) {
         let hash = Self::zobrist_hash(board);
+        let idx = Self::shard_index(hash);
+        let mut entries = self.shards[idx].lock().expect("tt mutex poisoned");
+        let age = self.age.load(Ordering::Relaxed);
 
-        if let Some(existing) = self.entries.get(&hash) {
-            if depth < existing.depth && existing.age == self.age {
+        if let Some(existing) = entries.get(&hash) {
+            if depth < existing.depth && existing.age == age {
                 return;
             }
-            self.collisions += 1;
+            self.collisions.fetch_add(1, Ordering::Relaxed);
         }
 
         let entry = TranspositionEntry {
@@ -61,43 +77,59 @@ impl TranspositionTable {
             depth,
             score,
             bound,
-            age: self.age,
+            age,
         };
 
-        if self.entries.len() >= self.max_entries {
-            self.clear();
+        if entries.len() >= self.per_shard {
+            entries.clear();
+            self.age.fetch_add(1, Ordering::Relaxed);
         }
 
-        self.entries.insert(hash, entry);
+        entries.insert(hash, entry);
     }
 
-    pub fn lookup(&mut self, board: &Board, depth: u32) -> Option<TranspositionEntry> {
+    pub fn lookup(&self, board: &Board, depth: u32) -> Option<TranspositionEntry> {
         let hash = Self::zobrist_hash(board);
+        let idx = Self::shard_index(hash);
+        let entries = self.shards[idx].lock().expect("tt mutex poisoned");
 
-        if let Some(entry) = self.entries.get(&hash) {
+        if let Some(entry) = entries.get(&hash) {
             if entry.depth >= depth {
-                self.hits += 1;
+                self.hits.fetch_add(1, Ordering::Relaxed);
                 return Some(*entry);
             }
         }
 
-        self.misses += 1;
+        self.misses.fetch_add(1, Ordering::Relaxed);
         None
     }
 
-    pub fn clear(&mut self) {
-        self.entries.clear();
-        self.age = self.age.wrapping_add(1);
+    pub fn clear(&self) {
+        for shard in &self.shards {
+            let mut entries = shard.lock().expect("tt mutex poisoned");
+            entries.clear();
+        }
+        self.age.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn reset_stats(&mut self) {
-        self.hits = 0;
-        self.misses = 0;
-        self.collisions = 0;
+    pub fn reset_stats(&self) {
+        self.hits.store(0, Ordering::Relaxed);
+        self.misses.store(0, Ordering::Relaxed);
+        self.collisions.store(0, Ordering::Relaxed);
     }
 
     pub fn stats(&self) -> (u64, u64, u64, usize) {
-        (self.hits, self.misses, self.collisions, self.entries.len())
+        let mut total = 0usize;
+        for shard in &self.shards {
+            let entries = shard.lock().expect("tt mutex poisoned");
+            total += entries.len();
+        }
+        (
+            self.hits.load(Ordering::Relaxed),
+            self.misses.load(Ordering::Relaxed),
+            self.collisions.load(Ordering::Relaxed),
+            total,
+        )
     }
 
     fn zobrist_hash(board: &Board) -> u64 {
@@ -211,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_tt_store_and_lookup() {
-        let mut tt = TranspositionTable::new(16);
+        let tt = TranspositionTable::new(16);
         let board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
             .expect("Failed to parse FEN");
 
@@ -225,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_tt_depth_cutoff() {
-        let mut tt = TranspositionTable::new(16);
+        let tt = TranspositionTable::new(16);
         let board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
             .expect("Failed to parse FEN");
 

@@ -22,6 +22,28 @@ class GoTimeout(Exception):
     pass
 
 
+OPENINGS = [
+    ["e2e4", "e7e5", "g1f3", "b8c6", "f1b5"],
+    ["e2e4", "e7e5", "g1f3", "b8c6", "d2d4"],
+    ["d2d4", "d7d5", "c2c4"],
+    ["d2d4", "g8f6", "c2c4", "e7e6"],
+    ["e2e4", "c7c5", "g1f3", "d7d6"],
+    ["e2e4", "e7e6", "d2d4", "d7d5"],
+    ["e2e4", "c7c6", "d2d4", "d7d5"],
+    ["g1f3", "d7d5", "d2d4"],
+    ["c2c4", "e7e5"],
+    ["e2e4", "g8f6", "e4e5"],
+    ["d2d4", "g8f6", "c2c4", "g7g6"],
+    ["g1f3", "g8f6", "c2c4"],
+    ["e2e4", "d7d6", "d2d4", "g8f6"],
+    ["d2d4", "f7f5"],
+    ["c2c4", "c7c5"],
+    ["b1c3", "d7d5", "d2d4"],
+    ["e2e4", "e7e5", "f1c4", "g8f6"],
+    ["d2d4", "d7d5", "c2c4", "e7e6"],
+]
+
+
 class UciEngine:
     def __init__(self, cmd: str, name: str):
         self.name = name
@@ -44,6 +66,9 @@ class UciEngine:
     def send(self, line: str):
         self.proc.stdin.write(line + "\n")
         self.proc.stdin.flush()
+
+    def set_option(self, name: str, value: str):
+        self.send(f"setoption name {name} value {value}")
 
     def next_line(self):
         while True:
@@ -107,6 +132,8 @@ def main():
     ap.add_argument("--go2", default=None, help="raw go args for engine2, e.g. 'depth 8'")
     ap.add_argument("--out", default=None, help="PGN output file")
     ap.add_argument("--go-timeout", type=float, default=120.0)
+    ap.add_argument("--threads1", type=int, default=1, help="Threads option for engine1")
+    ap.add_argument("--threads2", type=int, default=1, help="Threads option for engine2")
     args = ap.parse_args()
 
     go1 = None
@@ -128,6 +155,8 @@ def main():
     e1.go_timeout = args.go_timeout
     e2 = UciEngine(args.engine2, args.name2)
     e2.go_timeout = args.go_timeout
+    e1.set_option("Threads", str(args.threads1))
+    e2.set_option("Threads", str(args.threads2))
 
     results = {"1-0": 0, "0-1": 0, "1/2-1/2": 0}
     aborted = 0
@@ -139,7 +168,13 @@ def main():
         go_white = go1 if white is e1 else go2
         go_black = go2 if black is e2 else go1
 
-        moves = []
+        # Randomize the opening so deterministic engines still give variety.
+        import random
+        book = random.choice(OPENINGS)
+        plies = random.randint(2, min(7, len(book)))
+        opening = book[:plies]
+
+        moves = list(opening)
         result = None
         timed = False
         for ply in range(400):

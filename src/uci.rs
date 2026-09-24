@@ -115,6 +115,7 @@ impl UciEngine {
         println!("id name {}", self.info.name);
         println!("id author {}", self.info.author);
         println!("option name Hash type spin default 16 min 1 max 256");
+        println!("option name Threads type spin default 1 min 1 max 16");
         println!("option name Book type check default false");
         println!("option name Ponder type check default false");
         println!("option name GpuEnabled type check default false");
@@ -139,6 +140,12 @@ impl UciEngine {
                             self.options.insert(name.to_string(), value.clone());
                             self.searcher.set_tt_size(size);
                         }
+                    }
+                }
+                "Threads" => {
+                    if let Ok(threads) = value.parse::<usize>() {
+                        self.options.insert(name.to_string(), value.clone());
+                        self.searcher.set_threads(threads);
                     }
                 }
                 "Book" => {
@@ -381,10 +388,12 @@ impl UciEngine {
             .map(|v| v.to_lowercase() == "true")
             .unwrap_or(false);
         let side_is_white = board.turn == Color::White;
+        let threads = self.searcher.threads;
 
         let handle = thread::spawn(move || {
             let mut searcher = Searcher::new();
             searcher.set_tt_size(hash_mb);
+            searcher.set_threads(threads);
             searcher.set_stop_flag(Arc::clone(&flag));
             if use_book {
                 if let Err(e) = searcher.load_opening_book("endgames.epd") {

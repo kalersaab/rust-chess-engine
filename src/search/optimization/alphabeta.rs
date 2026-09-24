@@ -74,7 +74,7 @@ impl AlphaBeta {
         depth: u32,
         alpha: Score,
         beta: Score,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         orderer: &mut MoveOrderer,
     ) -> Score {
         let evaluator = Evaluator::new();
@@ -134,7 +134,7 @@ impl AlphaBeta {
         depth: u32,
         mut alpha: Score,
         beta: Score,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         orderer: &mut MoveOrderer,
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,

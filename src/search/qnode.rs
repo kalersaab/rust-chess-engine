@@ -27,7 +27,7 @@ impl QNode {
         board: &Board,
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         nodes: &mut u64,
     ) -> Score {
         *nodes += 1;
@@ -171,7 +171,7 @@ impl QSearch {
         beta: Score,
         evaluator: &Evaluator,
         accumulator: Option<&NNUEAccumulator>,
-        tt: &mut TranspositionTable,
+        tt: &TranspositionTable,
         nodes: &mut u64,
     ) -> Score {
         let mut qnode = QNode::new(alpha, beta, 0);
@@ -201,11 +201,11 @@ mod tests {
     fn test_qsearch_starting_position() {
         let board = Board::new();
         let evaluator = Evaluator::new();
-        let mut tt = TranspositionTable::new(1);
+        let tt = TranspositionTable::new(1);
         let mut nodes = 0;
         
         let qsearch = QSearch::new();
-        let score = qsearch.search(&board, -10000, 10000, &evaluator, None, &mut tt, &mut nodes);
+        let score = qsearch.search(&board, -10000, 10000, &evaluator, None, &tt, &mut nodes);
         
         assert!(score.abs() < 10000);
         assert!(nodes > 0);
